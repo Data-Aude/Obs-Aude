@@ -457,7 +457,6 @@ function buildCard(m) {
 
     return '<tr>' +
       '<td style="color:#8ab;padding:2px 5px 2px 0;white-space:nowrap;font-size:10px;font-weight:600">'+label+'</td>' +
-      '<td style="padding:2px 3px;text-align:right;font-weight:700;color:#f4a44a">'+valStr+'</td>' +
       '<td style="padding:2px 3px;text-align:right">'+meanStr+'</td>' +
       '<td style="padding:2px 3px;text-align:right;color:#ccd">'+medStr+'</td>' +
       '<td style="padding:2px 3px;text-align:right;color:#99b">'+q1Str+'</td>' +
@@ -468,9 +467,14 @@ function buildCard(m) {
   var ttHtml = '';
   // Titre & Valeur Aude
   if (m.aude !== undefined && m.aude !== null) {
-    ttHtml += '<div style="font-size:12px;font-weight:700;color:#f4a44a;margin-bottom:4px">' +
-      '📍 Aude (11) : ' + fmt(m.aude, m.fmt, m.unit) + (m.annee ? ' <span style="font-size:9px;opacity:.7">('+m.annee+')</span>' : '') +
+    ttHtml += '<div style="font-size:16px;font-weight:800;color:#f4a44a;margin-bottom:4px">' +
+      '📍 Aude (11) : ' + fmt(m.aude, m.fmt, m.unit) + (m.annee ? ' <span style="font-size:9px;font-weight:400;opacity:.7">('+m.annee+')</span>' : '') +
       '</div>';
+    var rk = [];
+    if (m.rank_strate && m.total_strate) rk.push('Strate <b>'+m.rank_strate+'/'+m.total_strate+'</b>');
+    if (m.rank_occ && m.total_occ) rk.push('Occitanie <b>'+m.rank_occ+'/'+m.total_occ+'</b>');
+    if (m.rank_fr && m.total_fr) rk.push('France <b>'+m.rank_fr+'/'+m.total_fr+'</b>');
+    if (rk.length) ttHtml += '<div style="font-size:10px;color:#ccd;margin-bottom:5px">Rang (1 = valeur la plus haute) : '+rk.join(' · ')+'</div>';
   }
   
   // Description
@@ -483,15 +487,14 @@ function buildCard(m) {
     '<table style="width:100%;border-collapse:collapse;font-size:10px">' +
     '<thead><tr style="color:#8ab;font-size:9px;text-align:right">' +
       '<th style="text-align:left;padding-bottom:3px">Échelle</th>' +
-      '<th style="padding:0 3px;color:#f4a44a">Aude</th>' +
       '<th style="padding:0 3px">Moy.</th>' +
       '<th style="padding:0 3px">Méd.</th>' +
       '<th style="padding:0 3px">Q1</th>' +
       '<th style="padding:0 3px">Q3</th>' +
     '</tr></thead><tbody>' +
-    ttStatsRow('Strate (11 dép.)', m.aude, m.stats_strate) +
-    ttStatsRow('Occitanie (13 dép.)', m.aude, m.stats_occ) +
-    ttStatsRow('France (96 dép.)', m.aude, m.stats_fr) +
+    ttStatsRow('Strate ('+(m.total_strate||'?')+' dép.)', m.aude, m.stats_strate) +
+    ttStatsRow('Occitanie ('+(m.total_occ||'?')+' dép.)', m.aude, m.stats_occ) +
+    ttStatsRow('France ('+(m.total_fr||'?')+' dép.)', m.aude, m.stats_fr) +
     '</tbody></table>' +
     '<div style="color:#7ab;font-size:8.5px;margin-top:4px;font-style:italic">Unité : '+(m.unit||'—')+'</div>';
 
@@ -1277,7 +1280,35 @@ async function loadCAF() {
     
     var prevIds = CAF_META.map(function(m){return m.id;});
     CAF_META = [];
-    
+
+    // Comparatif national : la CAF publie déjà une ligne par département pour chaque
+    // période — on récupère tous les départements pour la même date de référence que l'Aude,
+    // au lieu de ne garder que numdep="11". Plus simple que pour la DREES : pas de format long,
+    // juste une colonne par indicateur, directement comparable department par département.
+    var natMap = {}; // { [key]: {dept: valeur} }
+    try {
+      var natUrl = 'https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy/records?limit=100&where='+encodeURIComponent('dtreffre="'+dateRef+'"');
+      var rNat = await fetch(natUrl);
+      if (rNat.ok) {
+        var dataNat = await rNat.json();
+        var natRows = dataNat.results || [];
+        addLog('ℹ️', 'CAF : comparatif national récupéré sur '+natRows.length+' départements (période '+dateRef+').');
+        natRows.forEach(function(rr) {
+          var dc = rr.numdep;
+          if (dc == null) return;
+          Object.keys(rr).forEach(function(k) {
+            if (rr[k] === null || rr[k] === undefined) return;
+            if (!natMap[k]) natMap[k] = {};
+            natMap[k][dc] = rr[k];
+          });
+        });
+      } else {
+        addLog('⚠️', 'CAF : comparatif national indisponible (HTTP '+rNat.status+'), valeurs Aude seules.');
+      }
+    } catch (eNat) {
+      addLog('⚠️', 'CAF : comparatif national indisponible ('+eNat.message+'), valeurs Aude seules.');
+    }
+
     var CAF_FIELDS = [
       {key:'indfoy_rsa', label:'Foyers RSA', fmt:'int', unit:'foyers', themes:['social','financier']},
       {key:'indmtt_rsa', label:'Montant RSA versé', fmt:'eur0', unit:'€', themes:['social','financier']},
@@ -1305,7 +1336,8 @@ async function loadCAF() {
       if (val === null || val === undefined) return;
       var isNew = prevIds.indexOf('caf_'+f.key) < 0;
       if (isNew && prevIds.length > 0) newCount++;
-      CAF_META.push({
+
+      var entry = {
         id: 'caf_'+f.key,
         label: f.label,
         unit: f.unit,
@@ -1321,7 +1353,22 @@ async function loadCAF() {
         annee: dateRef,
         desc: 'Donnée mensuelle CAF pour le département de l\'Aude. Période de référence: '+dateRef+'.',
         isNew: isNew && prevIds.length > 0
-      });
+      };
+
+      var snapMap = natMap[f.key];
+      if (snapMap && Object.keys(snapMap).length > 1) {
+        DREES_SNAP['caf_'+f.key] = snapMap;
+        var frRes = statsAndRankFor(snapMap, null);
+        var strRes = statsAndRankFor(snapMap, STRATE);
+        var occRes = statsAndRankFor(snapMap, OCC);
+        entry.stats_fr = frRes.stats; entry.rank_fr = frRes.rank; entry.total_fr = frRes.total; entry.fra = frRes.stats.mean;
+        entry.stats_strate = strRes.stats; entry.rank_strate = strRes.rank; entry.total_strate = strRes.total;
+        entry.stats_occ = occRes.stats; entry.rank_occ = occRes.rank; entry.total_occ = occRes.total; entry.occ = occRes.stats.mean;
+      } else {
+        DREES_SNAP['caf_'+f.key] = { '11': val };
+      }
+
+      CAF_META.push(entry);
     });
     
     addLog('✅', 'CAF chargée: '+CAF_META.length+' indicateurs', true);
@@ -1389,19 +1436,50 @@ async function loadAude() {
 }
 
 async function loadINSEE() {
-  addLog('ℹ️', 'INSEE : instantané figé.');
-  if (typeof INSEE_META === 'undefined' || !INSEE_META.length) {
-    window.INSEE_META = [
-      { id:'insee_pop', label:'Population totale', unit:'hab.', fmt:'int', aude:375100, annee:'2022',
-        source:'INSEE — valeur connue', desc:"Population totale de l'Aude.",
-        occ:null, fra:null, rank_fr:null, rank_strate:null, rank_occ:null,
-        total_fr:96, total_strate:11, total_occ:13, stats_fr:{}, stats_strate:{}, stats_occ:{}, has_ts:false, isNew:false },
-      { id:'insee_tx_chomage', label:'Taux de chômage', unit:'%', fmt:'pct1', aude:9.6, annee:'2024 T4',
-        source:'INSEE — valeur connue', desc:"Taux de chômage localisé de l'Aude.",
-        occ:null, fra:null, rank_fr:null, rank_strate:null, rank_occ:null,
-        total_fr:96, total_strate:11, total_occ:13, stats_fr:{}, stats_strate:{}, stats_occ:{}, has_ts:false, isNew:false }
-    ];
+  // Aucune valeur écrite en dur : on interroge l'API Melodi de l'INSEE (population du département 11).
+  // Les valeurs « 375100 » et « 9,6 % » qui figuraient ici auparavant n'avaient pas de source vérifiée : supprimées.
+  addLog('⏳', 'INSEE : interrogation de l\'API Melodi (population, département 11)...');
+  var base = 'https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC';
+  var geoCandidates = ['DEP-11', '2023-DEP-11', '2022-DEP-11', '2021-DEP-11'];
+  var found = null, lastErr = null;
+  for (var gi = 0; gi < geoCandidates.length && !found; gi++) {
+    var url = base + '?GEO=' + encodeURIComponent(geoCandidates[gi]) + '&maxResult=1000';
+    try {
+      var r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) { lastErr = 'HTTP ' + r.status + ' (GEO=' + geoCandidates[gi] + ')'; continue; }
+      var data = await r.json();
+      var obs = data.observations || [];
+      if (!obs.length) { lastErr = '0 observation (GEO=' + geoCandidates[gi] + ', clés reçues : ' + Object.keys(data).join(', ') + ')'; continue; }
+      // On garde la ligne « tous âges / tous sexes » la plus récente
+      var totals = obs.filter(function(o) {
+        var d = o.dimensions || {};
+        return Object.keys(d).every(function(k) { return k === 'GEO' || k === 'TIME_PERIOD' || k === 'FREQ' || d[k] === '_T' || d[k] === 'Y_GE0' || k === 'RP_MEASURE' || k === 'UNIT_MEASURE'; });
+      });
+      var pool = totals.length ? totals : obs;
+      pool.sort(function(a, b) { return String((b.dimensions||{}).TIME_PERIOD).localeCompare(String((a.dimensions||{}).TIME_PERIOD)); });
+      var m0 = pool[0].measures || {};
+      var mv = m0.OBS_VALUE_NIVEAU || m0.OBS_VALUE || m0[Object.keys(m0)[0]] || {};
+      var v = (typeof mv === 'object') ? mv.value : mv;
+      if (v === undefined || v === null || isNaN(parseFloat(v))) { lastErr = 'valeur illisible (mesures : ' + Object.keys(m0).join(', ') + ')'; continue; }
+      found = { val: parseFloat(v), annee: (pool[0].dimensions || {}).TIME_PERIOD || null, geo: geoCandidates[gi] };
+    } catch (e) { lastErr = e.message + ' (GEO=' + geoCandidates[gi] + ')'; }
   }
+  if (!found) {
+    addLog('⚠️', 'INSEE : aucune donnée récupérée (' + lastErr + '). Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.');
+    return;
+  }
+  var existing = INSEE_META.find(function(m) { return m.id === 'insee_pop'; });
+  var entry = existing || {
+    id: 'insee_pop', label: 'Population totale', unit: 'hab.', fmt: 'int', themes: ['social', 'ages'],
+    occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
+    total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false,
+    desc: 'Population du département de l\'Aude (recensement, INSEE).'
+  };
+  entry.aude = found.val; entry.annee = found.annee;
+  entry.source = 'INSEE — API Melodi (direct)';
+  entry.isNew = !existing;
+  if (!existing) INSEE_META.push(entry);
+  addLog('✅', 'INSEE : population Aude = ' + found.val + ' (' + found.annee + ', GEO=' + found.geo + ')', !existing);
 }
 
 // ============================================================
@@ -1522,6 +1600,30 @@ var DREES_RULES = [
   // de session : à reprendre via téléchargement + parsing du fichier officiel si besoin plus tard.
 ];
 
+// Calcule n / moyenne / médiane / quartiles sur un tableau de valeurs numériques.
+// Fonction générique, réutilisée par le connecteur DREES ET le connecteur CAF.
+function computeStats(vals) {
+  if (!vals.length) return { n: 0 };
+  var s = vals.slice().sort(function(a, b) { return a - b; });
+  var n = s.length;
+  function q(p) { var pos = (n - 1) * p, b = Math.floor(pos), r = pos - b; return s[b + 1] !== undefined ? s[b] + r * (s[b + 1] - s[b]) : s[b]; }
+  return { n: n, mean: s.reduce(function(a, b) { return a + b; }, 0) / n, median: q(0.5), q1: q(0.25), q3: q(0.75) };
+}
+// Classe les départements d'un snap {dept: valeur} (rang 1 = valeur la plus haute), filtré
+// optionnellement sur une liste de codes (Occitanie / Strate), et calcule les stats associées.
+// Générique, réutilisée par le connecteur DREES ET le connecteur CAF.
+function statsAndRankFor(snapMap, deptFilter) {
+  var entries = Object.keys(snapMap)
+    .filter(function(d) { return !deptFilter || deptFilter.indexOf(d) >= 0; })
+    .map(function(d) { return { dept: d, val: snapMap[d] }; })
+    .filter(function(e) { return typeof e.val === 'number' && !isNaN(e.val); });
+  if (!entries.length) return { stats: { n: 0 }, rank: null, total: 0 };
+  var sorted = entries.slice().sort(function(a, b) { return b.val - a.val; });
+  var rank = null;
+  sorted.forEach(function(e, i) { if (e.dept === '11') rank = i + 1; });
+  return { stats: computeStats(entries.map(function(e) { return e.val; })), rank: rank, total: entries.length };
+}
+
 async function loadDREES() {
   addLog('⏳', 'DREES : détection des champs de l\'API sur data.drees...');
   var dsUsed = {};
@@ -1552,13 +1654,6 @@ async function loadDREES() {
     }
   }
 
-  function computeStats(vals) {
-    if (!vals.length) return { n: 0 };
-    var s = vals.slice().sort(function(a, b) { return a - b; });
-    var n = s.length;
-    function q(p) { var pos = (n - 1) * p, b = Math.floor(pos), r = pos - b; return s[b + 1] !== undefined ? s[b] + r * (s[b + 1] - s[b]) : s[b]; }
-    return { n: n, mean: s.reduce(function(a, b) { return a + b; }, 0) / n, median: q(0.5), q1: q(0.25), q3: q(0.75) };
-  }
   // Récupère la valeur des 95 autres départements pour un indicateur déjà identifié (même code_isd + même année),
   // pour reconstituer moyenne/médiane/quartiles/rangs — sans quoi on n'a que la valeur brute de l'Aude.
   async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee) {
@@ -1578,20 +1673,6 @@ async function loadDREES() {
       });
       return snapMap;
     } catch (e) { return null; }
-  }
-
-  // Classe les départements d'un snap {dept: valeur} (rang 1 = valeur la plus haute), filtré
-  // optionnellement sur une liste de codes (Occitanie / Strate), et calcule les stats associées.
-  function statsAndRankFor(snapMap, deptFilter) {
-    var entries = Object.keys(snapMap)
-      .filter(function(d) { return !deptFilter || deptFilter.indexOf(d) >= 0; })
-      .map(function(d) { return { dept: d, val: snapMap[d] }; })
-      .filter(function(e) { return typeof e.val === 'number' && !isNaN(e.val); });
-    if (!entries.length) return { stats: { n: 0 }, rank: null, total: 0 };
-    var sorted = entries.slice().sort(function(a, b) { return b.val - a.val; });
-    var rank = null;
-    sorted.forEach(function(e, i) { if (e.dept === '11') rank = i + 1; });
-    return { stats: computeStats(entries.map(function(e) { return e.val; })), rank: rank, total: entries.length };
   }
 
   if (typeof DREES_META === 'undefined') window.DREES_META = [];
