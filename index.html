@@ -1481,20 +1481,19 @@ async function loadINSEE() {
     });
     return pool;
   }
-  // Même requête pour tous les départements (comparatif). Le séparateur « + » n'étant pas garanti, on essaie 2 formes.
+  // Même requête pour tous les départements (comparatif) : GEO=DEP désigne le niveau « département ».
   async function allDeps(ds, sampleObs, keepDims) {
-    var deps = Object.keys(DEPTS).filter(function(c) { return c !== '6AE'; });
     var filt = '';
     Object.keys((sampleObs[0] || {}).dimensions || {}).forEach(function(k) {
       if (k === 'GEO' || k === 'TIME_PERIOD' || keepDims.indexOf(k) >= 0) return;
       var vals = Array.from(new Set(sampleObs.map(function(o) { return dim(o, k); })));
       if (vals.indexOf('_T') >= 0) filt += '&' + k + '=_T';
     });
-    var forms = [deps.map(function(c) { return 'DEP-' + c; }).join('+'), deps.map(function(c) { return 'DEP-' + c; }).join('%2B')];
+    var tries = filt ? [filt, ''] : [''];
     var lastErr = null;
-    for (var i = 0; i < forms.length; i++) {
+    for (var i = 0; i < tries.length; i++) {
       try {
-        var o = await get(ds, 'GEO=' + forms[i], filt);
+        var o = await get(ds, 'GEO=DEP', tries[i]);
         var nb = Array.from(new Set(o.map(depCode).filter(Boolean))).length;
         if (nb >= 20) return o;
         lastErr = 'seulement ' + nb + ' département(s) renvoyé(s)';
@@ -1755,10 +1754,12 @@ async function loadDREES() {
 
   // Valeur des autres départements pour un indicateur identifié (même code_isd + même année),
   // pour reconstituer moyenne/médiane/quartiles/rangs.
-  async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee, scale) {
+  async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee, scale, labelField, exactLabel) {
     if (!codeIsd || !yearField || annee == null) return null;
     try {
-      var rows = await fetchDreesPages(dsKey, 'code_isd="' + codeIsd + '" AND ' + yearField + '=' + annee, 3);
+      var rows = await fetchDreesPages(dsKey, 'code_isd="' + codeIsd + '" AND ' + yearField + '=' + annee, 8);
+      // Un même code_isd regroupe plusieurs indicateurs : on ne garde que celui dont le libellé est exactement le nôtre
+      if (labelField && exactLabel) rows = rows.filter(function(rr) { return fuseFr(rr[labelField] || '') === fuseFr(exactLabel); });
       var snapMap = {};
       rows.forEach(function(rr) {
         var dc = rr[deptField], v = rr.value;
@@ -1805,7 +1806,7 @@ async function loadDREES() {
     if (!existing) DREES_META.push(entry);
 
     var codeIsd = rec.code_isd;
-    var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee, rule.scale) : null;
+    var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee, rule.scale, labelField, rule.exact) : null;
     if (snapMap && Object.keys(snapMap).length > 1) {
       DREES_SNAP[rule.id] = snapMap;
       var frRes = statsAndRankFor(snapMap, null);
