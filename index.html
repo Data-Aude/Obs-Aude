@@ -1441,80 +1441,148 @@ async function loadAude() {
 }
 
 async function loadINSEE() {
-  // Aucune valeur écrite en dur : tout vient de l'API Melodi de l'INSEE (recensement, département 11).
-  addLog('⏳', 'INSEE : interrogation de l\'API Melodi (population par âge, département 11)...');
-  var base = 'https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC';
-  var obs = null, lastErr = null;
-  var geoCandidates = ['DEP-11', '2023-DEP-11', '2022-DEP-11'];
-  for (var gi = 0; gi < geoCandidates.length && !obs; gi++) {
-    try {
-      var r = await fetch(base + '?GEO=' + encodeURIComponent(geoCandidates[gi]) + '&maxResult=1000', { headers: { 'Accept': 'application/json' } });
-      if (!r.ok) { lastErr = 'HTTP ' + r.status + ' (GEO=' + geoCandidates[gi] + ')'; continue; }
-      var data = await r.json();
-      if ((data.observations || []).length) obs = data.observations; else lastErr = '0 observation (GEO=' + geoCandidates[gi] + ')';
-    } catch (e) { lastErr = e.message + ' (GEO=' + geoCandidates[gi] + ')'; }
-  }
-  if (!obs) { addLog('⚠️', 'INSEE : aucune donnée récupérée (' + lastErr + '). Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.'); return; }
-
+  // Aucune valeur écrite en dur : tout vient de l'API Melodi de l'INSEE (accès libre, 30 requêtes/minute).
+  addLog('⏳', 'INSEE : interrogation de l\'API Melodi (recensement + Filosofi)...');
+  var BASE = 'https://api.insee.fr/melodi/data/';
   function dim(o, k) { return (o.dimensions || {})[k]; }
-  function measure(o) {
+  function val(o) {
     var m = o.measures || {}, mv = m.OBS_VALUE_NIVEAU || m.OBS_VALUE || m[Object.keys(m)[0]] || {};
     var v = (typeof mv === 'object') ? mv.value : mv;
     return (v === undefined || v === null || isNaN(parseFloat(v))) ? null : parseFloat(v);
   }
-  // Période la plus récente, tous sexes confondus, autres dimensions ramenées à leur total (_T) quand il existe
-  var periods = Array.from(new Set(obs.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
-  var period = periods[periods.length - 1];
-  var pool = obs.filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === period; });
-  var skip = { GEO: 1, TIME_PERIOD: 1, AGE: 1, FREQ: 1, UNIT_MEASURE: 1 };
-  var dimNames = Object.keys(pool[0].dimensions || {}).filter(function(k) { return !skip[k]; });
-  dimNames.forEach(function(k) {
-    var vals = Array.from(new Set(pool.map(function(o) { return dim(o, k); })));
-    if (vals.length > 1 && vals.indexOf('_T') >= 0) pool = pool.filter(function(o) { return dim(o, k) === '_T'; });
-  });
-  var ages = Array.from(new Set(pool.map(function(o) { return dim(o, 'AGE'); })));
-  addLog('ℹ️', 'INSEE : période ' + period + ', ' + pool.length + ' observations, tranches d\'âge : ' + ages.slice(0, 40).join(', ') + (ages.length > 40 ? '…' : ''));
-
-  function ageRange(c) {
-    var m;
-    if ((m = /^Y_LT(\d+)$/.exec(c))) return [0, +m[1] - 1];
-    if ((m = /^Y_GE(\d+)$/.exec(c))) return [+m[1], 999];
-    if ((m = /^Y(\d+)T(\d+)$/.exec(c))) return [+m[1], +m[2]];
-    if ((m = /^Y(\d+)$/.exec(c))) return [+m[1], +m[1]];
+  function depCode(o) {
+    var m = /DEP-(\w+)$/.exec(String(dim(o, 'GEO') || ''));
+    if (!m) return null;
+    return m[1].length === 1 ? '0' + m[1] : m[1];
+  }
+  async function get(ds, geoParam, filters) {
+    var r = await fetch(BASE + ds + '?' + geoParam + (filters || '') + '&maxResult=10000', { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    return d.observations || [];
+  }
+  async function audeObs(ds) {
+    var last = null, geos = ['DEP-11', '2023-DEP-11', '2022-DEP-11'];
+    for (var i = 0; i < geos.length; i++) {
+      try { var o = await get(ds, 'GEO=' + geos[i]); if (o.length) return o; last = '0 observation'; } catch (e) { last = e.message; }
+    }
+    throw new Error(last || 'échec');
+  }
+  function latestPeriod(obs) {
+    var ps = Array.from(new Set(obs.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
+    return ps[ps.length - 1];
+  }
+  // Ramène chaque dimension « secondaire » (sexe…) à son total « _T » quand il existe
+  function reduceTotals(pool, keep) {
+    var names = Object.keys((pool[0] || {}).dimensions || {}).filter(function(k) { return k !== 'GEO' && k !== 'TIME_PERIOD' && keep.indexOf(k) < 0; });
+    names.forEach(function(k) {
+      var vals = Array.from(new Set(pool.map(function(o) { return dim(o, k); })));
+      if (vals.length > 1 && vals.indexOf('_T') >= 0) pool = pool.filter(function(o) { return dim(o, k) === '_T'; });
+    });
+    return pool;
+  }
+  // Même requête pour tous les départements (comparatif). Le séparateur « + » n'étant pas garanti, on essaie 2 formes.
+  async function allDeps(ds, sampleObs, keepDims) {
+    var deps = Object.keys(DEPTS).filter(function(c) { return c !== '6AE'; });
+    var filt = '';
+    Object.keys((sampleObs[0] || {}).dimensions || {}).forEach(function(k) {
+      if (k === 'GEO' || k === 'TIME_PERIOD' || keepDims.indexOf(k) >= 0) return;
+      var vals = Array.from(new Set(sampleObs.map(function(o) { return dim(o, k); })));
+      if (vals.indexOf('_T') >= 0) filt += '&' + k + '=_T';
+    });
+    var forms = [deps.map(function(c) { return 'DEP-' + c; }).join('+'), deps.map(function(c) { return 'DEP-' + c; }).join('%2B')];
+    var lastErr = null;
+    for (var i = 0; i < forms.length; i++) {
+      try {
+        var o = await get(ds, 'GEO=' + forms[i], filt);
+        var nb = Array.from(new Set(o.map(depCode).filter(Boolean))).length;
+        if (nb >= 20) return o;
+        lastErr = 'seulement ' + nb + ' département(s) renvoyé(s)';
+      } catch (e) { lastErr = e.message; }
+    }
+    addLog('⚠️', 'INSEE (' + ds + ') : comparatif départemental indisponible (' + lastErr + ') — valeur Aude seule.');
     return null;
   }
-  var items = [], total = null;
-  pool.forEach(function(o) {
-    var a = dim(o, 'AGE'), v = measure(o);
-    if (v === null) return;
-    if (a === '_T') { total = v; return; }
-    var rg = ageRange(a); if (rg) items.push({ lo: rg[0], hi: rg[1], v: v });
-  });
-  // Feuilles = tranches qui n'en contiennent pas d'autres (évite les doubles comptes si plusieurs granularités)
-  var leaves = items.filter(function(x) {
-    return !items.some(function(y) { return y !== x && x.lo <= y.lo && x.hi >= y.hi && (x.lo < y.lo || x.hi > y.hi); });
-  });
-  if (total === null) total = leaves.reduce(function(s, x) { return s + x.v; }, 0);
-  function alignedAt(b) { return !leaves.some(function(x) { return x.lo < b && x.hi >= b; }); }
-  function sum(lo, hi) { return leaves.filter(function(x) { return x.lo >= lo && x.hi <= hi; }).reduce(function(s, x) { return s + x.v; }, 0); }
-
-  function put(id, label, unit, fmtName, val, desc, themes) {
+  function put(id, label, unit, fmtName, aude, period, desc, themes, snap) {
     var existing = INSEE_META.find(function(m) { return m.id === id; });
     var e = existing || { id: id, label: label, unit: unit, fmt: fmtName, themes: themes,
       occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
       total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false, desc: desc };
-    e.aude = val; e.annee = period; e.source = 'INSEE — API Melodi (direct)'; e.isNew = !existing;
+    e.aude = aude; e.annee = period; e.source = 'INSEE — API Melodi (direct)'; e.isNew = !existing;
     if (!existing) INSEE_META.push(e);
-    addLog('✅', 'INSEE : ' + label + ' = ' + (Math.round(val * 100) / 100) + ' ' + unit + ' (' + period + ')', !existing);
+    var txt = '';
+    if (snap && Object.keys(snap).length >= 20) {
+      DREES_SNAP[id] = snap;
+      var fr = statsAndRankFor(snap, null), st = statsAndRankFor(snap, STRATE), oc = statsAndRankFor(snap, OCC);
+      e.stats_fr = fr.stats; e.rank_fr = fr.rank; e.total_fr = fr.total; e.fra = fr.stats.mean;
+      e.stats_strate = st.stats; e.rank_strate = st.rank; e.total_strate = st.total;
+      e.stats_occ = oc.stats; e.rank_occ = oc.rank; e.total_occ = oc.total; e.occ = oc.stats.mean;
+      txt = ' — comparatif sur ' + fr.total + ' départements (moy. ' + fr.stats.mean.toFixed(2) + ')';
+    } else { DREES_SNAP[id] = { '11': aude }; }
+    addLog('✅', 'INSEE : ' + label + ' = ' + (Math.round(aude * 100) / 100) + ' ' + unit + ' (' + period + ')' + txt, !existing);
   }
-  put('insee_pop', 'Population totale', 'hab.', 'int', total, 'Population du département de l\'Aude (recensement, INSEE).', ['demographie']);
-  if (leaves.length && total > 0) {
-    if (alignedAt(75)) put('insee_p75', 'Part des 75 ans et plus', '%', 'pct1', sum(75, 999) / total * 100, 'Part des 75 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']);
-    if (alignedAt(65)) put('insee_p65', 'Part des 65 ans et plus', '%', 'pct1', sum(65, 999) / total * 100, 'Part des 65 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']);
-    if (alignedAt(20)) put('insee_m20', 'Part des moins de 20 ans', '%', 'pct1', sum(0, 19) / total * 100, 'Part des moins de 20 ans dans la population (recensement INSEE).', ['demographie', 'ase']);
-    if (alignedAt(20) && alignedAt(65) && sum(0, 19) > 0) put('insee_ivieil', 'Indice de vieillissement', '', 'dec1', sum(65, 999) / sum(0, 19) * 100, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']);
-  } else {
-    addLog('⚠️', 'INSEE : tranches d\'âge non exploitables, seule la population totale est affichée.');
+
+  // ---------- 1) Population par tranche d'âge (recensement) ----------
+  try {
+    var ds1 = 'DS_RP_POPULATION_PRINC';
+    var obsA = await audeObs(ds1);
+    var period = latestPeriod(obsA);
+    var dimsInfo = Object.keys(obsA[0].dimensions || {}).map(function(k) { return k + '=' + Array.from(new Set(obsA.map(function(o) { return dim(o, k); }))).slice(0, 8).join('/'); });
+    addLog('ℹ️', 'INSEE (' + ds1 + ') : ' + obsA.length + ' observations pour l\'Aude, dimensions → ' + dimsInfo.join(' ; '));
+    var all = await allDeps(ds1, obsA, ['AGE']);
+    var src = all || obsA;
+    var pool = reduceTotals(src.filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === period; }), ['AGE']);
+    var perDep = {};
+    pool.forEach(function(o) {
+      var c = depCode(o), v = val(o); if (!c || v === null) return;
+      (perDep[c] = perDep[c] || {})[dim(o, 'AGE')] = v;
+    });
+    var defs = [
+      ['insee_pop',    'Population totale',            'hab.', 'int',  function(d) { return d._T; },                                      'Population du département (recensement, INSEE).', ['demographie']],
+      ['insee_p65',    'Part des 65 ans et plus',      '%',    'pct1', function(d) { return d._T && d.Y_GE65 != null ? d.Y_GE65 / d._T * 100 : null; }, 'Part des 65 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']],
+      ['insee_p80',    'Part des 80 ans et plus',      '%',    'pct1', function(d) { return d._T && d.Y_GE80 != null ? d.Y_GE80 / d._T * 100 : null; }, 'Part des 80 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']],
+      ['insee_m20',    'Part des moins de 20 ans',     '%',    'pct1', function(d) { return d._T && d.Y_LT20 != null ? d.Y_LT20 / d._T * 100 : null; }, 'Part des moins de 20 ans dans la population (recensement INSEE).', ['demographie', 'ase']],
+      ['insee_m15',    'Part des moins de 15 ans',     '%',    'pct1', function(d) { return d._T && d.Y_LT15 != null ? d.Y_LT15 / d._T * 100 : null; }, 'Part des moins de 15 ans dans la population (recensement INSEE).', ['demographie', 'ase']],
+      ['insee_a2064',  'Part des 20-64 ans',           '%',    'pct1', function(d) { return d._T && d.Y20T64 != null ? d.Y20T64 / d._T * 100 : null; }, 'Part des 20-64 ans dans la population (recensement INSEE).', ['demographie']],
+      ['insee_ivieil', 'Indice de vieillissement',     '',     'dec1', function(d) { return d.Y_GE65 != null && d.Y_LT20 ? d.Y_GE65 / d.Y_LT20 * 100 : null; }, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']]
+    ];
+    defs.forEach(function(df) {
+      var snap = {};
+      Object.keys(perDep).forEach(function(c) { var v = df[4](perDep[c]); if (v !== null && v !== undefined && !isNaN(v)) snap[c] = v; });
+      if (snap['11'] === undefined) { addLog('⚠️', 'INSEE : ' + df[1] + ' non calculable (tranches d\'âge absentes).'); return; }
+      put(df[0], df[1], df[2], df[3], snap['11'], period, df[5], df[6], snap);
+    });
+  } catch (e) {
+    addLog('⚠️', 'INSEE (population par âge) : ' + e.message + '. Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.');
+  }
+
+  // ---------- 2) Pauvreté et niveau de vie médian (Filosofi) ----------
+  try {
+    var ds2 = 'DS_FILOSOFI_CC';
+    var obsF = await audeObs(ds2);
+    var perF = latestPeriod(obsF);
+    var measDim = null;
+    Object.keys(obsF[0].dimensions || {}).forEach(function(k) {
+      var vals = obsF.map(function(o) { return dim(o, k); });
+      if (vals.indexOf('PR_MD60') >= 0 || vals.indexOf('MED_SL') >= 0) measDim = k;
+    });
+    var dimsF = Object.keys(obsF[0].dimensions || {}).map(function(k) { return k + '=' + Array.from(new Set(obsF.map(function(o) { return dim(o, k); }))).slice(0, 6).join('/'); });
+    addLog('ℹ️', 'INSEE (' + ds2 + ') : ' + obsF.length + ' observations pour l\'Aude, dimensions → ' + dimsF.join(' ; '));
+    if (!measDim) throw new Error('mesures PR_MD60 / MED_SL introuvables dans la réponse');
+    var allF = await allDeps(ds2, obsF, [measDim]);
+    var poolF = reduceTotals((allF || obsF).filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === perF; }), [measDim]);
+    var fdefs = [
+      ['insee_pauv', 'PR_MD60', 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) — Filosofi, INSEE.', ['demographie', 'social']],
+      ['insee_nvmed', 'MED_SL', 'Niveau de vie médian', '€', 'eur0', 'Niveau de vie médian annuel par unité de consommation — Filosofi, INSEE.', ['demographie', 'social', 'financier']]
+    ];
+    fdefs.forEach(function(fd) {
+      var snap = {};
+      poolF.forEach(function(o) { if (dim(o, measDim) !== fd[1]) return; var c = depCode(o), v = val(o); if (c && v !== null) snap[c] = v; });
+      if (snap['11'] === undefined) { addLog('⚠️', 'INSEE : ' + fd[2] + ' absent pour l\'Aude.'); return; }
+      put(fd[0], fd[2], fd[3], fd[4], snap['11'], perF, fd[5], fd[6], snap);
+    });
+  } catch (e) {
+    addLog('⚠️', 'INSEE (Filosofi) : ' + e.message + '.');
   }
 }
 
@@ -1631,10 +1699,10 @@ var DREES_RULES = [
   { id:'ind48', ds:'financiers', exact:"Dépenses brutes d'aide à l'accueil pour personnes handicapées par bénéficiaire", label:'Dépenses aide à l\'accueil PH / bénéficiaire', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses brutes d'aide à l'accueil des personnes handicapées rapportées au nombre de bénéficiaires." },
   { id:'ind49', ds:'financiers', exact:"Dépenses brutes de placement de l'ASE par habitant", label:'Dépenses placement ASE / habitant', unit:'€', fmt:'eur0', themes:['ase','financier'], desc:"Dépenses brutes de placement de l'ASE rapportées à la population." },
   { id:'ind50', ds:'financiers', exact:"Dépenses brutes de placement de l'ASE par bénéficiaire", label:'Dépenses placement ASE / bénéficiaire', unit:'€', fmt:'eur0', themes:['ase','financier'], desc:"Dépenses brutes de placement de l'ASE rapportées au nombre de bénéficiaires." },
-  { id:'ind31', ds:'enfance', exact:"Taux de mesures d'ASE (mesures de placements et actions éducatives) en % des 0-20 ans", label:'Taux mesures ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures d'aide sociale à l'enfance (placements + actions éducatives) rapportées à la population des 0-20 ans." },
-  { id:'ind32', ds:'enfance', exact:"Taux d'actions éducatives (AED et AEMO) dans la population des 0-20 ans", label:'Taux actions éducatives ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Actions éducatives (AED + AEMO) rapportées à la population des 0-20 ans." },
-  { id:'ind33', ds:'enfance', exact:"Taux de mesures de placement (enfants accueillis à l'ASE) dans la population des 0-20 ans", label:'Taux mesures accueil ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures de placement (enfants accueillis à l'ASE) rapportées à la population des 0-20 ans." },
-  { id:'ind34', ds:'enfance', exact:"Part des mineurs dont le juge est saisi", label:'Part mineurs saisine juge enfants', unit:'%', fmt:'pct1', themes:['ase'], desc:"Part des mineurs dont le juge des enfants est saisi en assistance éducative." },
+  { id:'ind31', ds:'enfance', exact:"Taux de mesures d'ASE (mesures de placements et actions éducatives) en % des 0-20 ans", label:'Taux mesures ASE', scale:100, unit:'%', fmt:'pct1', themes:['ase'], desc:"Mesures d'aide sociale à l'enfance (placements + actions éducatives) rapportées à la population des 0-20 ans." },
+  { id:'ind32', ds:'enfance', exact:"Taux d'actions éducatives (AED et AEMO) dans la population des 0-20 ans", label:'Taux actions éducatives ASE', scale:100, unit:'%', fmt:'pct1', themes:['ase'], desc:"Actions éducatives (AED + AEMO) rapportées à la population des 0-20 ans." },
+  { id:'ind33', ds:'enfance', exact:"Taux de mesures de placement (enfants accueillis à l'ASE) dans la population des 0-20 ans", label:'Taux mesures accueil ASE', scale:100, unit:'%', fmt:'pct1', themes:['ase'], desc:"Mesures de placement (enfants accueillis à l'ASE) rapportées à la population des 0-20 ans." },
+  { id:'ind34', ds:'enfance', exact:"Part des mineurs dont le juge est saisi", label:'Part mineurs saisine juge enfants', scale:100, unit:'%', fmt:'pct1', themes:['ase'], desc:"Part des mineurs dont le juge des enfants est saisi en assistance éducative." },
   { id:'ind35', ds:'enfance', exact:"Nombre de places en établissement d’aide sociale à l’enfance pour 1 000 jeunes de 0 à 20 ans", label:"Places en établissement ASE / 1 000 jeunes", unit:'‰', fmt:'dec1', themes:['ase'], desc:"Places en établissement d'aide sociale à l'enfance pour 1 000 jeunes de 0 à 20 ans." }
 ];
 
@@ -1687,7 +1755,7 @@ async function loadDREES() {
 
   // Valeur des autres départements pour un indicateur identifié (même code_isd + même année),
   // pour reconstituer moyenne/médiane/quartiles/rangs.
-  async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee) {
+  async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee, scale) {
     if (!codeIsd || !yearField || annee == null) return null;
     try {
       var rows = await fetchDreesPages(dsKey, 'code_isd="' + codeIsd + '" AND ' + yearField + '=' + annee, 3);
@@ -1695,7 +1763,7 @@ async function loadDREES() {
       rows.forEach(function(rr) {
         var dc = rr[deptField], v = rr.value;
         if (dc == null || v === null || v === undefined || v === '') return;
-        snapMap[String(dc)] = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v;
+        snapMap[String(dc)] = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (scale || 1);
       });
       return snapMap;
     } catch (e) { return null; }
@@ -1720,7 +1788,7 @@ async function loadDREES() {
     }
     var val = rec.value;
     if (val === null || val === undefined || val === '') { addLog('⚠️', rule.id + ' : ligne trouvée mais valeur vide.'); continue; }
-    var aude = typeof val === 'string' ? parseFloat(val.replace(',', '.')) : val;
+    var aude = (typeof val === 'string' ? parseFloat(val.replace(',', '.')) : val) * (rule.scale || 1);
     var annee = yearField ? rec[yearField] : null;
     var isNew = prevIds.indexOf(rule.id) < 0;
     var existing = DREES_META.find(function(m) { return m.id === rule.id; });
@@ -1737,7 +1805,7 @@ async function loadDREES() {
     if (!existing) DREES_META.push(entry);
 
     var codeIsd = rec.code_isd;
-    var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee) : null;
+    var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee, rule.scale) : null;
     if (snapMap && Object.keys(snapMap).length > 1) {
       DREES_SNAP[rule.id] = snapMap;
       var frRes = statsAndRankFor(snapMap, null);
@@ -1746,6 +1814,11 @@ async function loadDREES() {
       entry.stats_fr = frRes.stats; entry.rank_fr = frRes.rank; entry.total_fr = frRes.total; entry.fra = frRes.stats.mean;
       entry.stats_strate = strRes.stats; entry.rank_strate = strRes.rank; entry.total_strate = strRes.total;
       entry.stats_occ = occRes.stats; entry.rank_occ = occRes.rank; entry.total_occ = occRes.total; entry.occ = occRes.stats.mean;
+      var allV = Object.keys(snapMap).map(function(k) { return snapMap[k]; }).filter(function(x) { return typeof x === 'number' && !isNaN(x); });
+      var mx = Math.max.apply(null, allV), mn = Math.min.apply(null, allV);
+      if (frRes.stats.median > 0 && mx > 20 * frRes.stats.median) {
+        addLog('⚠️', rule.id + ' : échelles possiblement hétérogènes selon les départements (min ' + mn.toFixed(3) + ' / médiane ' + frRes.stats.median.toFixed(3) + ' / max ' + mx.toFixed(3) + ') — moyenne à interpréter avec prudence.');
+      }
       addLog('✅', rule.id + ' (' + entry.label + ') : ' + aude + ' ' + (entry.unit || '') + ' — comparatif sur ' + frRes.total + ' départements (moy. ' + entry.fra.toFixed(2) + '), année ' + annee, isNew);
     } else {
       DREES_SNAP[rule.id] = { '11': aude };
