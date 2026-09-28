@@ -109,7 +109,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .map-svg path{stroke:#edf2f7;stroke-width:0.5;cursor:pointer;transition:opacity .1s}
 .map-svg path.hl{stroke:#1a2845 !important;stroke-width:1.5}
 .map-svg path:hover{opacity:.8}
-#map-legend{width:160px;background:#fff;border:1px solid #d0e2f0;border-radius:8px;padding:12px;font-size:11px;align-self:flex-start;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+#map-legend{width:190px;background:#fff;border:1px solid #d0e2f0;border-radius:8px;padding:12px;font-size:11px;align-self:flex-start;box-shadow:0 1px 4px rgba(0,0,0,.07)}
 #map-legend h4{color:#3a7abf;margin-bottom:10px;font-size:11px;font-weight:600}
 .legend-item{display:flex;align-items:center;gap:6px;margin-bottom:5px}
 .legend-swatch{width:18px;height:14px;border-radius:2px;flex-shrink:0}
@@ -164,6 +164,26 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .card-tooltip table{width:100%;border-collapse:collapse}
 .card-tooltip td, .card-tooltip th{padding:3px 5px;font-size:10.5px}
 .card-tooltip th{border-bottom:1px solid rgba(255,255,255,0.2)}
+
+#pdf-preview-body{max-height:75vh}
+.pdf-sum{width:100%;border-collapse:collapse;font-size:9px;margin-bottom:6px}
+.pdf-sum th,.pdf-sum td{border:1px solid #d0e2f0;padding:3px 4px;text-align:right}
+.pdf-sum th{background:#eaf2fb;color:#1a4a6e;text-align:center}
+.pdf-sum td:first-child{text-align:left}
+.pdf-ind{border-top:2px solid #1a4a6e;margin-top:16px;padding-top:6px;page-break-inside:avoid;break-inside:avoid}
+.pdf-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.pdf-charts h4{font-size:10.5px;color:#3a7abf;margin:4px 0}
+.pdf-na{font-size:10px;color:#999;font-style:italic}
+.msg.welcome{padding:40px 20px;text-align:center}
+@media print{
+  #nav,#tooltip,.no-print,#pdf-preview-header{display:none!important}
+  body{background:#fff!important}
+  .section{padding:0!important;min-height:0!important}
+  #pdf-preview-wrap{display:block!important;border:none!important;box-shadow:none!important;margin:0!important}
+  #pdf-preview-body{max-height:none!important;overflow:visible!important;padding:0!important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{margin:12mm}
+}
 </style>
 </head>
 <body>
@@ -173,7 +193,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 <img class="nav-logo" src="images/logocd11.png" alt="Logo Conseil départemental de l'Aude" style="margin-right:10px">
     <div>
       <div class="brand">Observatoire Social · Aude (11)</div>
-      <div class="subtitle">DREES · INSEE · CAF · Open Data Aude · v8</div>
+      <div class="subtitle">DREES · INSEE · CAF · Open Data Aude · v9</div>
     </div>
   </div>
   <button class="nav-tab on" onclick="showTab('dash',this)">Tableau de bord</button>
@@ -326,7 +346,7 @@ function rebuildAllMeta() {
   
   if (typeof DREES_SNAP !== 'undefined') {
     ALL_META.forEach(function(m) {
-      if (DREES_SNAP[m.id] && Object.keys(DREES_SNAP[m.id]).length > 0) MAP_CARTEABLE[m.id] = true;
+      if (DREES_SNAP[m.id] && Object.keys(DREES_SNAP[m.id]).length >= 10) MAP_CARTEABLE[m.id] = true;
     });
   }
 }
@@ -388,7 +408,15 @@ function renderDashCards() {
     html += '</div></div>';
   });
   
-  if (!html) html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur</strong><p>Sélectionnez un thème ou rechargez les données.</p></div>';
+  if (!html) {
+    if (!ALL_META.length) {
+      html = '<div class="msg welcome"><div class="ico">📊</div><strong style="font-size:18px">Bienvenue sur l\'Observatoire social de l\'Aude</strong>' +
+        '<p style="margin:10px 0 16px">Pour afficher les indicateurs, chargez les données officielles (INSEE, DREES, CAF, Département). Cela prend quelques secondes.</p>' +
+        '<button class="gen-pdf-btn" id="welcome-reload" onclick="reloadLive()">⚡ Recharger les données</button></div>';
+    } else {
+      html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur pour ce thème</strong><p>Choisissez un autre thème.</p></div>';
+    }
+  }
   document.getElementById('dash-cards').innerHTML = html;
 }
 
@@ -754,6 +782,15 @@ function setThemeEvo(thId) {
 
 function renderEvoIndBar() {
   var bar = document.getElementById('evo-ind-bar');
+  if (!currentThemeEvo && typeof DREES_TS !== 'undefined') {
+    var firstEvo = THEMES.filter(function(t){ return t.id !== 'all'; }).find(function(t){
+      return ALL_META.some(function(m){ return DREES_TS[m.id] && m.themes && m.themes.indexOf(t.id) >= 0; });
+    });
+    if (firstEvo) {
+      currentThemeEvo = firstEvo.id;
+      document.querySelectorAll('#evolution .theme-btn').forEach(function(b){ b.classList.toggle('on', b.dataset.themeId === currentThemeEvo); });
+    }
+  }
   if (!currentThemeEvo) {
     if (bar) bar.innerHTML = '<span style="color:#888;font-size:12px;padding:8px;display:block">&#x2190; Sélectionnez un thème pour afficher les indicateurs</span>';
     var svg = document.getElementById('evo-svg');
@@ -949,6 +986,13 @@ function setThemeCarte(thId) {
 }
 
 function renderCarteIndBar() {
+  if (!currentThemeCarte) {
+    var firstTh = THEMES.filter(function(t){ return t.id !== 'all'; }).find(function(t){
+      return ALL_META.some(function(m){ return MAP_CARTEABLE[m.id] && m.themes && m.themes.indexOf(t.id) >= 0; });
+    });
+    currentThemeCarte = firstTh ? firstTh.id : 'all';
+    document.querySelectorAll('#carte .theme-btn').forEach(function(b){ b.classList.toggle('on', b.dataset.themeId === currentThemeCarte); });
+  }
   var inds = (currentThemeCarte === 'all' ? ALL_META : ALL_META.filter(function(m){
     return m.themes && m.themes.indexOf(currentThemeCarte) >= 0;
   })).filter(function(m){ return MAP_CARTEABLE[m.id]; });
@@ -1042,45 +1086,66 @@ function colorMap() {
   var snap = DREES_SNAP[currentIndCarte];
   var m = ALL_META.find(function(x){return x.id===currentIndCarte;});
   if (!snap || !m) return;
-  
   var wrap = document.getElementById('map-svg-wrap');
   if (!wrap || !wrap.querySelector('svg')) return;
-  
-  var vals = Object.values(snap).filter(function(v){return v!==null&&v!==undefined;});
-  if (!vals.length) return;
-  
-  var minV=Math.min.apply(null,vals), maxV=Math.max.apply(null,vals);
-  var colors = ['#1a3a6a','#2060a0','#4090d0','#69B8F0','#FFA040','#ED7D31','#c85020','#8B1A00'];
-  
-  function getColor(val) {
-    if (val===null||val===undefined) return '#2a3560';
-    var t=(val-minV)/(maxV-minV||1);
-    var idx=Math.min(Math.floor(t*(colors.length-1)), colors.length-2);
-    var frac=t*(colors.length-1)-idx;
-    function hexToRgb(h){var r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return[r,g,b];}
-    function lerp(a,b,t){return Math.round(a+(b-a)*t);}
-    var c1=hexToRgb(colors[idx]), c2=hexToRgb(colors[idx+1]);
-    return 'rgb('+lerp(c1[0],c2[0],frac)+','+lerp(c1[1],c2[1],frac)+','+lerp(c1[2],c2[2],frac)+')';
-  }
-  
+
+  var vals = Object.keys(snap).map(function(k){ return snap[k]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
+  if (vals.length < 2) return;
+  vals.sort(function(a,b){ return a-b; });
+
+  // 5 classes en quintiles : plus le bleu est foncé, plus la valeur est élevée
+  var palette = ['#e8f1fb','#b7d3ee','#79aede','#3b7fc4','#0f4c8a'];
+  var breaks = [];
+  for (var q = 1; q < 5; q++) breaks.push(vals[Math.min(vals.length - 1, Math.floor(vals.length * q / 5))]);
+  function classOf(v) { var c = 0; while (c < breaks.length && v >= breaks[c]) c++; return c; }
+  function getColor(v) { return (typeof v !== 'number' || isNaN(v)) ? '#e5e9f0' : palette[classOf(v)]; }
+
+  var svg = wrap.querySelector('svg');
+  svg.querySelectorAll('.aude-hl').forEach(function(n){ n.remove(); });
+  var audePath = null;
   wrap.querySelectorAll('path[data-code]').forEach(function(path){
-    var code=path.dataset.code;
-    var val=snap[code];
-    path.setAttribute('fill', getColor(val));
-    if (code==='11') { path.setAttribute('stroke','#ffffff'); path.setAttribute('stroke-width','1.5'); }
-    else { path.setAttribute('stroke','#fff'); path.setAttribute('stroke-width','0.5'); }
+    var code = path.dataset.code;
+    path.setAttribute('fill', getColor(snap[code]));
+    path.setAttribute('stroke', '#ffffff');
+    path.setAttribute('stroke-width', '0.6');
+    if (code === '11') audePath = path;
   });
-  
-  var legEl=document.getElementById('legend-items');
-  if (legEl) {
-    var steps=6;
-    var legHtml='';
-    for(var i=steps;i>=0;i--){
-      var v=minV+(maxV-minV)*i/steps;
-      legHtml+='<div class="legend-item"><div class="legend-swatch" style="background:'+getColor(v)+'"></div>' +
-        '<span>'+fmtShort(v,m.fmt)+(m.unit?' '+m.unit:'')+'</span></div>';
+
+  // L'Aude ressort : contour orange épais doublé d'un liseré sombre, tracé par-dessus les autres départements + étiquette
+  if (audePath) {
+    var d = audePath.getAttribute('d'), NS = 'http://www.w3.org/2000/svg';
+    [['#1a2845', 5.5], ['#ED7D31', 3]].forEach(function(st) {
+      var ov = document.createElementNS(NS, 'path');
+      ov.setAttribute('d', d); ov.setAttribute('class', 'aude-hl'); ov.setAttribute('fill', 'none');
+      ov.style.setProperty('stroke', st[0], 'important'); ov.style.setProperty('stroke-width', String(st[1]), 'important'); ov.setAttribute('stroke-linejoin', 'round');
+      ov.setAttribute('pointer-events', 'none');
+      svg.appendChild(ov);
+    });
+    var nums = (d.match(/-?\d+\.?\d*,-?\d+\.?\d*/g) || []).map(function(t){ var p = t.split(','); return [parseFloat(p[0]), parseFloat(p[1])]; });
+    if (nums.length) {
+      var xs = nums.map(function(n){return n[0];}), ys = nums.map(function(n){return n[1];});
+      var cx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2, cy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+      var tx = document.createElementNS(NS, 'text');
+      tx.setAttribute('x', cx); tx.setAttribute('y', cy + 3); tx.setAttribute('text-anchor', 'middle');
+      tx.setAttribute('class', 'aude-hl'); tx.setAttribute('font-size', '11'); tx.setAttribute('font-weight', '800');
+      tx.setAttribute('fill', '#1a2845'); tx.setAttribute('stroke', '#ffffff'); tx.setAttribute('stroke-width', '3'); tx.setAttribute('paint-order', 'stroke');
+      tx.setAttribute('pointer-events', 'none'); tx.textContent = 'AUDE';
+      svg.appendChild(tx);
     }
-    legEl.innerHTML=legHtml;
+  }
+
+  var legEl = document.getElementById('legend-items');
+  if (legEl) {
+    var bounds = [vals[0]].concat(breaks).concat([vals[vals.length - 1]]);
+    var legHtml = '<div style="font-weight:700;color:#1a2845;margin-bottom:6px;line-height:1.3">' + m.label + (m.unit ? ' <span style="font-weight:400">(' + m.unit + ')</span>' : '') + '</div>';
+    for (var i = 4; i >= 0; i--) {
+      legHtml += '<div class="legend-item"><div class="legend-swatch" style="background:' + palette[i] + '"></div><span>' + fmtShort(bounds[i], m.fmt) + ' – ' + fmtShort(bounds[i + 1], m.fmt) + '</span></div>';
+    }
+    legHtml += '<div class="legend-item"><div class="legend-swatch" style="background:#e5e9f0"></div><span>Pas de donnée</span></div>';
+    legHtml += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #d0e2f0;color:#1a2845"><span style="display:inline-block;width:14px;height:10px;border:2px solid #ED7D31;box-shadow:0 0 0 1px #1a2845;vertical-align:middle;margin-right:5px"></span><b>Aude</b> : ' + fmt(m.aude, m.fmt, m.unit) +
+      (m.rank_fr ? '<br><span style="font-size:10px">Rang ' + m.rank_fr + '/' + m.total_fr + ' (1 = valeur la plus haute)</span>' : '') + '</div>';
+    legHtml += '<div style="margin-top:6px;font-size:10px;color:#888">Plus la couleur est foncée, plus la valeur est élevée.</div>';
+    legEl.innerHTML = legHtml;
   }
 }
 
@@ -1118,6 +1183,7 @@ async function reloadLive() {
     if (typeof drawEvoChart === 'function') drawEvoChart();
     if (typeof renderCarteIndBar === 'function') renderCarteIndBar();
     if (typeof colorMap === 'function') colorMap();
+    if (typeof buildExport === 'function' && document.getElementById('export') && document.getElementById('export').innerHTML) buildExport();
 
     const nbOk = resultats.filter(r => r.status === 'fulfilled').length;
     const erreurs = resultats.filter(r => r.status === 'rejected');
@@ -1198,72 +1264,159 @@ function buildNouveautes() {
 // ============================================================
 // EXPORT PDF — sélection de thèmes + aperçu imprimable (impression navigateur → « Enregistrer en PDF »)
 // ============================================================
-var exportSelectedThemes = ['all'];
+var exportTheme = 'all';
+var exportSel = {};
+var exportOpts = { synth: true, rank: true, evo: true, def: true };
 
-function toggleExportTheme(id) {
-  if (id === 'all') { exportSelectedThemes = ['all']; }
-  else {
-    exportSelectedThemes = exportSelectedThemes.filter(function(t){return t!=='all';});
-    var i = exportSelectedThemes.indexOf(id);
-    if (i >= 0) exportSelectedThemes.splice(i,1); else exportSelectedThemes.push(id);
-    if (!exportSelectedThemes.length) exportSelectedThemes = ['all'];
-  }
-  buildExport();
+function exportInds() {
+  return ALL_META.filter(function(m) { return exportTheme === 'all' || (m.themes && m.themes.indexOf(exportTheme) >= 0); });
 }
+function toggleExportTheme(id) { exportTheme = id; buildExport(); }
+function toggleExportInd(id, on) { if (on) exportSel[id] = true; else delete exportSel[id]; var c = document.getElementById('exp-count'); if (c) c.textContent = Object.keys(exportSel).length; }
+function exportSelectAll(on) { exportInds().forEach(function(m) { if (on) exportSel[m.id] = true; else delete exportSel[m.id]; }); buildExport(); }
+function setExportOpt(k, on) { exportOpts[k] = on; }
 
 function buildExport() {
   var el = document.getElementById('export');
   if (!el) return;
-
+  if (!ALL_META.length) {
+    el.innerHTML = '<div class="msg welcome"><div class="ico">📄</div><strong style="font-size:16px">Aucune donnée à exporter pour le moment</strong>' +
+      '<p style="margin:10px 0 16px">Chargez d\'abord les données officielles.</p><button class="gen-pdf-btn" onclick="reloadLive()">⚡ Recharger les données</button></div>';
+    return;
+  }
   var themeBtns = THEMES.map(function(t) {
-    var on = exportSelectedThemes.indexOf(t.id) >= 0;
-    return '<button class="exp-theme-btn'+(on?' on':'')+'" onclick="toggleExportTheme(\''+t.id+'\')">'+t.lbl+'</button>';
+    return '<button class="exp-theme-btn' + (exportTheme === t.id ? ' on' : '') + '" onclick="toggleExportTheme(\'' + t.id + '\')">' + t.lbl + '</button>';
   }).join(' ');
+  var list = exportInds().map(function(m) {
+    return '<label class="exp-opt-row" style="cursor:pointer"><input type="checkbox" ' + (exportSel[m.id] ? 'checked ' : '') + 'onchange="toggleExportInd(\'' + m.id + '\', this.checked)"> ' + m.label +
+      ' <span style="color:#9ab;font-size:10px">(' + (m.source ? m.source.split(' — ')[0] : '') + ')</span></label>';
+  }).join('');
+  function opt(k, txt) { return '<label class="exp-opt-row" style="cursor:pointer"><input type="checkbox" ' + (exportOpts[k] ? 'checked ' : '') + 'onchange="setExportOpt(\'' + k + '\', this.checked)"> ' + txt + '</label>'; }
 
   el.innerHTML =
-    '<h2 style="color:#1a4a6e;margin-bottom:14px">📄 Export PDF</h2>'+
-    '<div class="exp-options"><h4>Thèmes à inclure</h4><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">'+themeBtns+'</div>'+
-    '<div class="exp-opt-row"><input type="checkbox" id="exp-opt-desc" checked> <label for="exp-opt-desc">Inclure les définitions des indicateurs</label></div>'+
-    '<div class="exp-opt-row"><input type="checkbox" id="exp-opt-src" checked> <label for="exp-opt-src">Inclure la source et l\'année de référence</label></div>'+
-    '<button class="gen-pdf-btn" onclick="generatePdf()">Générer l\'aperçu</button></div>'+
-    '<div id="pdf-preview-wrap"><div id="pdf-preview-header"><span>Aperçu — Observatoire Social de l\'Aude</span>'+
-    '<span><button onclick="window.print()" style="background:#ED7D31;border:none;color:#fff;cursor:pointer;font-size:11px;padding:5px 10px;border-radius:4px;margin-right:8px">🖨️ Imprimer / Enregistrer en PDF</button>'+
-    '<button onclick="document.getElementById(\'pdf-preview-wrap\').classList.remove(\'on\')" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px">✕</button></span></div>'+
+    '<h2 class="no-print" style="color:#1a4a6e;margin-bottom:14px">📄 Export PDF</h2>' +
+    '<div class="exp-options no-print"><h4>1. Choisissez les indicateurs</h4><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' + themeBtns + '</div>' +
+    '<div style="margin-bottom:8px;font-size:12px"><a href="#" onclick="exportSelectAll(true);return false">Tout cocher</a> · <a href="#" onclick="exportSelectAll(false);return false">Tout décocher</a> — <b id="exp-count">' + Object.keys(exportSel).length + '</b> sélectionné(s)</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 16px;max-height:260px;overflow-y:auto">' + list + '</div></div>' +
+    '<div class="exp-options no-print"><h4>2. Contenu du rapport</h4>' +
+    opt('synth', 'Tableau de synthèse (Aude, moyenne, médiane, quartiles, rangs — strate, Occitanie, France)') +
+    opt('rank', 'Graphique : classement de l\'Aude parmi les départements de sa strate') +
+    opt('evo', 'Graphique : évolution des données de l\'Aude (avec moyennes Occitanie et France)') +
+    opt('def', 'Définition de chaque indicateur') +
+    '<button class="gen-pdf-btn" style="margin-top:8px" onclick="generatePdf()">Générer le rapport</button></div>' +
+    '<div id="pdf-preview-wrap"><div id="pdf-preview-header"><span>Aperçu du rapport</span>' +
+    '<span><button onclick="window.print()" style="background:#ED7D31;border:none;color:#fff;cursor:pointer;font-size:11px;padding:5px 10px;border-radius:4px;margin-right:8px">🖨️ Imprimer / Enregistrer en PDF</button>' +
+    '<button onclick="document.getElementById(\'pdf-preview-wrap\').classList.remove(\'on\')" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px">✕</button></span></div>' +
     '<div id="pdf-preview-body"></div></div>';
 }
 
+// Graphique : l'Aude parmi les départements de sa strate (barres horizontales, Aude en orange)
+function svgRankStrate(m) {
+  var snap = DREES_SNAP[m.id]; if (!snap) return null;
+  var codes = STRATE.slice(); if (codes.indexOf('11') < 0) codes.push('11');
+  var items = codes.map(function(c) { return { c: c, v: snap[c] }; }).filter(function(x) { return typeof x.v === 'number' && !isNaN(x.v); }).sort(function(a, b) { return b.v - a.v; });
+  if (items.length < 3 || !items.some(function(x) { return x.c === '11'; })) return null;
+  var W = 340, rowH = 18, PL = 105, PR = 55, H = items.length * rowH + 8;
+  var mx = Math.max.apply(null, items.map(function(x) { return x.v; })), mn = Math.min(0, Math.min.apply(null, items.map(function(x) { return x.v; })));
+  var span = (mx - mn) || 1, bw = W - PL - PR;
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">';
+  items.forEach(function(x, i) {
+    var y = 4 + i * rowH, isA = x.c === '11', w = Math.max(1, (x.v - mn) / span * bw);
+    var nm = (DEPTS[x.c] || x.c); if (nm.length > 18) nm = nm.slice(0, 17) + '…';
+    out += '<text x="' + (PL - 5) + '" y="' + (y + 12) + '" font-size="9" text-anchor="end" fill="' + (isA ? '#c85a10' : '#444') + '" font-weight="' + (isA ? 800 : 400) + '">' + nm + '</text>';
+    out += '<rect x="' + PL + '" y="' + (y + 2) + '" width="' + w.toFixed(1) + '" height="' + (rowH - 6) + '" fill="' + (isA ? '#ED7D31' : '#8fb2dc') + '" rx="2"/>';
+    out += '<text x="' + (PL + w + 4) + '" y="' + (y + 12) + '" font-size="9" fill="#333" font-weight="' + (isA ? 800 : 400) + '">' + fmtShort(x.v, m.fmt) + '</text>';
+  });
+  var rk = items.findIndex(function(x) { return x.c === '11'; }) + 1;
+  return { svg: out + '</svg>', rank: rk, total: items.length };
+}
+
+// Graphique : évolution de l'Aude (trait plein orange) vs moyennes Occitanie / France (pointillés)
+function svgEvoAude(m) {
+  var ts = DREES_TS[m.id]; if (!ts || !ts['11']) return null;
+  var a = ts['11'], years = Object.keys(a).sort(); if (years.length < 2) return null;
+  var audeMean = years.reduce(function(s, y) { return s + a[y]; }, 0) / years.length;
+  var series = [{ k: '11', col: '#ED7D31', lbl: 'Aude', dash: false }];
+  [['OCC', '#2E7D32', 'Moy. Occitanie'], ['FRA', '#4472C4', 'Moy. France']].forEach(function(o) {
+    var t = ts[o[0]]; if (!t) return;
+    var vs = years.map(function(y) { return t[y]; }).filter(function(v) { return typeof v === 'number'; });
+    if (vs.length < 2) return;
+    var mean = vs.reduce(function(s, v) { return s + v; }, 0) / vs.length;
+    if (audeMean && (mean / audeMean > 20 || mean / audeMean < 0.05)) return; // échelle incohérente : non tracée
+    series.push({ k: o[0], col: o[1], lbl: o[2], dash: true });
+  });
+  var W = 340, H = 205, PL = 46, PR = 10, PT = 10, PB = 44, cW = W - PL - PR, cH = H - PT - PB;
+  var all = []; series.forEach(function(sr) { years.forEach(function(y) { var v = (ts[sr.k] || {})[y]; if (typeof v === 'number') all.push(v); }); });
+  var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all), pad = (mx - mn) * 0.1 || Math.abs(mx) * 0.1 || 1;
+  mn -= pad; mx += pad;
+  var y0 = parseInt(years[0], 10), y1 = parseInt(years[years.length - 1], 10);
+  function X(y) { return PL + (y1 === y0 ? cW / 2 : (parseInt(y, 10) - y0) / (y1 - y0) * cW); }
+  function Y(v) { return PT + cH - (v - mn) / (mx - mn) * cH; }
+  var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">';
+  for (var i = 0; i <= 4; i++) {
+    var v = mn + (mx - mn) * i / 4, yy = Y(v);
+    out += '<line x1="' + PL + '" y1="' + yy.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + yy.toFixed(1) + '" stroke="#e1e5ea"/><text x="' + (PL - 4) + '" y="' + (yy + 3).toFixed(1) + '" font-size="8" text-anchor="end" fill="#777">' + fmtShort(v, m.fmt) + '</text>';
+  }
+  var ticks = [years[0], years[Math.floor(years.length / 2)], years[years.length - 1]];
+  ticks.forEach(function(y, i) { out += '<text x="' + X(y).toFixed(1) + '" y="' + (PT + cH + 12) + '" font-size="8" text-anchor="' + (i === 0 ? 'start' : i === 2 ? 'end' : 'middle') + '" fill="#777">' + y + '</text>'; });
+  series.slice().reverse().forEach(function(sr) {
+    var pts = years.filter(function(y) { return typeof (ts[sr.k] || {})[y] === 'number'; });
+    if (!pts.length) return;
+    var d = pts.map(function(y, i) { return (i ? 'L' : 'M') + X(y).toFixed(1) + ',' + Y(ts[sr.k][y]).toFixed(1); }).join(' ');
+    out += '<path d="' + d + '" fill="none" stroke="' + sr.col + '" stroke-width="' + (sr.dash ? 1.4 : 2.6) + '"' + (sr.dash ? ' stroke-dasharray="4,3"' : '') + '/>';
+    if (!sr.dash) out += '<circle cx="' + X(pts[pts.length - 1]).toFixed(1) + '" cy="' + Y(ts[sr.k][pts[pts.length - 1]]).toFixed(1) + '" r="3.5" fill="' + sr.col + '"/>';
+  });
+  series.forEach(function(sr, i) {
+    var lx = PL + i * 100, ly = H - 12;
+    out += '<line x1="' + lx + '" y1="' + ly + '" x2="' + (lx + 16) + '" y2="' + ly + '" stroke="' + sr.col + '" stroke-width="' + (sr.dash ? 1.4 : 2.6) + '"' + (sr.dash ? ' stroke-dasharray="4,3"' : '') + '/><text x="' + (lx + 20) + '" y="' + (ly + 3) + '" font-size="8" fill="#444">' + sr.lbl + '</text>';
+  });
+  return out + '</svg>';
+}
+
 function generatePdf() {
-  if (typeof ALL_META === 'undefined' || !ALL_META.length) { alert('Aucune donnée à exporter pour le moment. Cliquez sur « Recharger données » depuis le tableau de bord.'); return; }
-  var includeDesc = document.getElementById('exp-opt-desc').checked;
-  var includeSrc  = document.getElementById('exp-opt-src').checked;
-  var wantAll = exportSelectedThemes.indexOf('all') >= 0;
+  var inds = ALL_META.filter(function(m) { return exportSel[m.id]; });
+  if (!inds.length) { alert('Cochez au moins un indicateur à inclure dans le rapport.'); return; }
+  function n(v, f) { return (typeof v === 'number' && !isNaN(v)) ? fmtShort(v, f) : '—'; }
+  function rk(r, t) { return (r && t) ? r + '/' + t : '—'; }
 
-  var byTheme = {};
-  ALL_META.forEach(function(m) {
-    var themes = m.themes || ['all'];
-    if (!wantAll && !themes.some(function(t){return exportSelectedThemes.indexOf(t)>=0;})) return;
-    var key = themes[0] || 'autre';
-    if (!byTheme[key]) byTheme[key] = [];
-    byTheme[key].push(m);
-  });
+  var html = '<div class="pdf-head"><h2 style="color:#1a4a6e;margin:0">Observatoire social — Département de l\'Aude</h2>' +
+    '<p style="color:#667;font-size:11px;margin:4px 0 10px">Rapport généré le ' + new Date().toLocaleDateString('fr-FR') + ' · Sources officielles : DREES, INSEE, CAF, Open Data Aude · Rang 1 = valeur la plus haute</p></div>';
 
-  var html = '<h2 style="color:#1a4a6e">Observatoire Social — Département de l\'Aude</h2>'+
-    '<p style="color:#88a;font-size:11px">Généré le '+new Date().toLocaleString('fr-FR')+'</p>';
-
-  Object.keys(byTheme).forEach(function(key) {
-    var th = THEMES.find(function(t){return t.id===key;});
-    html += '<h3 style="color:#3a7abf;border-bottom:1px solid #d0e2f0;padding-bottom:4px;margin-top:18px">'+(th?th.lbl:key)+'</h3>';
-    byTheme[key].forEach(function(m) {
-      html += '<div style="margin-bottom:10px"><b>'+m.label+'</b> : '+fmt(m.aude, m.fmt, m.unit)+
-        (m.annee ? ' <span style="color:#88a">('+m.annee+')</span>' : '')+
-        (includeDesc && m.desc ? '<div style="color:#556;font-size:11px">'+m.desc+'</div>' : '')+
-        (includeSrc && m.source ? '<div style="color:#9ab;font-size:10px">Source : '+m.source+'</div>' : '')+
-        '</div>';
+  if (exportOpts.synth) {
+    html += '<h3 style="color:#3a7abf;margin:6px 0">Tableau de synthèse</h3><table class="pdf-sum"><thead><tr><th rowspan="2">Indicateur</th><th rowspan="2">Année</th><th rowspan="2">Aude</th>' +
+      '<th colspan="4">Strate</th><th colspan="4">Occitanie</th><th colspan="4">France</th></tr><tr>' +
+      ['Moy.', 'Méd.', 'Q1', 'Q3', 'Moy.', 'Méd.', 'Q1', 'Q3', 'Moy.', 'Méd.', 'Q1', 'Q3'].map(function(h) { return '<th>' + h + '</th>'; }).join('') +
+      '</tr></thead><tbody>';
+    inds.forEach(function(m) {
+      function grp(st) { st = st || {}; return ['mean', 'median', 'q1', 'q3'].map(function(k) { return '<td>' + n(st[k], m.fmt) + '</td>'; }).join(''); }
+      html += '<tr><td><b>' + m.label + '</b>' + (m.unit ? ' <span style="color:#889">(' + m.unit + ')</span>' : '') + '</td><td>' + (m.annee || '—') + '</td><td style="background:#fff3e8;font-weight:800">' + n(m.aude, m.fmt) + '</td>' +
+        grp(m.stats_strate) + grp(m.stats_occ) + grp(m.stats_fr) + '</tr>';
     });
-  });
+    html += '</tbody></table>';
+    html += '<table class="pdf-sum" style="margin-top:8px"><thead><tr><th>Rang de l\'Aude (1 = valeur la plus haute)</th><th>Strate</th><th>Occitanie</th><th>France</th></tr></thead><tbody>' +
+      inds.map(function(m) { return '<tr><td>' + m.label + '</td><td>' + rk(m.rank_strate, m.total_strate) + '</td><td>' + rk(m.rank_occ, m.total_occ) + '</td><td>' + rk(m.rank_fr, m.total_fr) + '</td></tr>'; }).join('') + '</tbody></table>';
+  }
+
+  if (exportOpts.rank || exportOpts.evo || exportOpts.def) {
+    inds.forEach(function(m) {
+      var rkC = exportOpts.rank ? svgRankStrate(m) : null, evC = exportOpts.evo ? svgEvoAude(m) : null;
+      html += '<div class="pdf-ind"><h3 style="margin:0;color:#1a4a6e">' + m.label + (m.unit ? ' <span style="font-weight:400;color:#889">(' + m.unit + ')</span>' : '') + '</h3>' +
+        '<div style="font-size:12px;margin:3px 0"><b style="color:#c85a10;font-size:15px">Aude : ' + fmt(m.aude, m.fmt, m.unit) + '</b>' + (m.annee ? ' <span style="color:#889">(' + m.annee + ')</span>' : '') +
+        ' · Rang — Strate ' + rk(m.rank_strate, m.total_strate) + ' · Occitanie ' + rk(m.rank_occ, m.total_occ) + ' · France ' + rk(m.rank_fr, m.total_fr) + '</div>' +
+        (exportOpts.def && m.desc ? '<p style="font-size:10.5px;color:#445;margin:2px 0 6px">' + m.desc + '</p>' : '');
+      if (exportOpts.rank || exportOpts.evo) {
+        html += '<div class="pdf-charts">';
+        if (exportOpts.rank) html += '<div><h4>Classement de l\'Aude dans sa strate' + (rkC ? ' — ' + rkC.rank + 'ᵉ sur ' + rkC.total : '') + '</h4>' + (rkC ? rkC.svg : '<p class="pdf-na">Comparatif de la strate non disponible pour cet indicateur.</p>') + '</div>';
+        if (exportOpts.evo) html += '<div><h4>Évolution de l\'Aude</h4>' + (evC || '<p class="pdf-na">Série temporelle non disponible (un seul millésime publié).</p>') + '</div>';
+        html += '</div>';
+      }
+      html += '<div style="font-size:9px;color:#9ab;margin-top:2px">Source : ' + (m.source || '') + '</div></div>';
+    });
+  }
 
   document.getElementById('pdf-preview-body').innerHTML = html;
-  document.getElementById('pdf-preview-wrap').classList.add('on');
+  var w = document.getElementById('pdf-preview-wrap'); w.classList.add('on');
+  if (w.scrollIntoView) w.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function loadCAF() {
@@ -1336,6 +1489,27 @@ async function loadCAF() {
       {key:'indmtt_ppa', label:'Montant PPA versé', fmt:'eur0', unit:'€', themes:['social','financier']},
     ];
     
+    var CAF_DEFS = {
+      indfoy_rsa: "Nombre de foyers allocataires du revenu de solidarité active (RSA), minimum social versé aux personnes sans ressources ou à faibles ressources.",
+      indmtt_rsa: "Montant total de RSA versé dans le mois aux foyers du département.",
+      indben_aah: "Nombre de bénéficiaires de l'allocation aux adultes handicapés (AAH), qui garantit un revenu minimum aux personnes en situation de handicap.",
+      indmtt_aah: "Montant total d'AAH versé dans le mois.",
+      indben_aeeh: "Nombre de bénéficiaires de l'allocation d'éducation de l'enfant handicapé (AEEH), versée aux parents d'un enfant en situation de handicap.",
+      indben_ajpa: "Nombre de bénéficiaires de l'allocation journalière du proche aidant (AJPA), versée aux salariés qui interrompent leur activité pour aider un proche.",
+      indmtt_ajpa: "Montant total d'allocation journalière du proche aidant versé dans le mois.",
+      indben_ajpp: "Nombre de bénéficiaires de l'allocation journalière de présence parentale (AJPP), versée aux parents d'un enfant gravement malade ou handicapé.",
+      indfoy_apl: "Nombre de foyers percevant l'aide personnalisée au logement (APL), qui réduit le loyer ou les charges d'emprunt.",
+      indmtt_apl: "Montant total d'APL versé dans le mois.",
+      indfoy_alf: "Nombre de foyers percevant l'allocation de logement familiale (ALF), destinée aux familles et aux ménages non éligibles à l'APL.",
+      indfoy_als: "Nombre de foyers percevant l'allocation de logement sociale (ALS), destinée aux ménages non éligibles à l'APL ni à l'ALF.",
+      indfoy_af: "Nombre de foyers percevant les allocations familiales, versées aux familles ayant au moins deux enfants à charge.",
+      indmtt_af: "Montant total d'allocations familiales versé dans le mois.",
+      indfoy_cf: "Nombre de foyers percevant le complément familial, versé aux familles d'au moins trois enfants aux ressources modestes.",
+      indfoy_ars: "Nombre de foyers percevant l'allocation de rentrée scolaire (ARS), versée chaque année aux familles pour la scolarité des 6-18 ans.",
+      indfoy_asf: "Nombre de foyers percevant l'allocation de soutien familial (ASF), versée au parent qui élève seul un enfant.",
+      indfoy_ppa: "Nombre de foyers percevant la prime d'activité, complément de revenu pour les travailleurs aux ressources modestes.",
+      indmtt_ppa: "Montant total de prime d'activité versé dans le mois."
+    };
     CAF_FIELDS.forEach(function(f) {
       var val = rec[f.key];
       if (val === null || val === undefined) return;
@@ -1356,7 +1530,7 @@ async function loadCAF() {
         has_ts: false,
         source: 'CAF — données mensuelles',
         annee: dateRef,
-        desc: 'Donnée mensuelle CAF pour le département de l\'Aude. Période de référence: '+dateRef+'.',
+        desc: (CAF_DEFS[f.key] || 'Donnée mensuelle CAF.') + ' Valeur du dernier mois publié (' + dateRef + ').',
         isNew: isNew && prevIds.length > 0
       };
 
@@ -1376,6 +1550,41 @@ async function loadCAF() {
       CAF_META.push(entry);
     });
     
+    // Séries d'évolution : dernier mois publié de chaque année, pour l'Aude, l'Occitanie (moy.) et la France (moy.)
+    try {
+      var cafBase = 'https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy/records';
+      var okKeys = CAF_META.map(function(m) { return m.id.replace('caf_', ''); });
+      function annualOf(rows, getter) {
+        var out = {};
+        rows.forEach(function(rr) { // lignes triées par date décroissante : la première rencontrée par année = dernier mois
+          var y = String(rr.dtreffre).slice(0, 4), v = getter(rr);
+          if (out[y] === undefined && typeof v === 'number' && !isNaN(v)) out[y] = v;
+        });
+        return out;
+      }
+      var selAvg = 'dtreffre,' + okKeys.map(function(k) { return 'avg(' + k + ') as a_' + k; }).join(',');
+      var occWhere = OCC.map(function(c) { return 'numdep="' + c + '"'; }).concat(['numdep="9"']).join(' OR ');
+      var reqs = [
+        fetch(cafBase + '?limit=100&order_by=' + encodeURIComponent('dtreffre DESC') + '&where=' + encodeURIComponent('numdep="11"')),
+        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg)),
+        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg) + '&where=' + encodeURIComponent(occWhere))
+      ];
+      var resp = await Promise.all(reqs);
+      var rowsA = resp[0].ok ? (await resp[0].json()).results || [] : [];
+      var rowsF = resp[1].ok ? (await resp[1].json()).results || [] : [];
+      var rowsO = resp[2].ok ? (await resp[2].json()).results || [] : [];
+      var nTs = 0;
+      okKeys.forEach(function(k) {
+        if (setTs('caf_' + k, '11', annualOf(rowsA, function(rr) { return rr[k]; }))) {
+          nTs++;
+          setTs('caf_' + k, 'FRA', annualOf(rowsF, function(rr) { return rr['a_' + k]; }));
+          setTs('caf_' + k, 'OCC', annualOf(rowsO, function(rr) { return rr['a_' + k]; }));
+        }
+      });
+      addLog(nTs ? 'ℹ️' : '⚠️', 'CAF : évolution annuelle chargée pour ' + nTs + ' indicateurs (HTTP ' + resp.map(function(x) { return x.status; }).join('/') + ').');
+    } catch (eTs) {
+      addLog('⚠️', 'CAF : séries d\'évolution indisponibles (' + eTs.message + ').');
+    }
     addLog('✅', 'CAF chargée: '+CAF_META.length+' indicateurs', true);
   } catch(e) {
     addLog('❌', 'CAF erreur: '+e.message);
@@ -1384,10 +1593,10 @@ async function loadCAF() {
 
 async function loadAude() {
   var datasets = [
-    {url:'cd11_etablissements_pa', label:'Établissements PA', themes:['ages','aude']},
-    {url:'cd11_etablissements_ph', label:'Établissements PH', themes:['handicap','aude']},
-    {url:'cd11_eaje', label:'Établissements EAJE', themes:['social','aude']},
-    {url:'cd11_mds', label:'Maisons De la Solidarité', themes:['social','aude']},
+    {url:'cd11_etablissements_pa', label:'Établissements PA', themes:['ages','aude'], def:"Nombre d'établissements et services pour personnes âgées (EHPAD, résidences autonomie…) recensés sur le portail Open Data du Département de l'Aude."},
+    {url:'cd11_etablissements_ph', label:'Établissements PH', themes:['handicap','aude'], def:"Nombre d'établissements et services pour personnes handicapées recensés sur le portail Open Data du Département de l'Aude."},
+    {url:'cd11_eaje', label:'Établissements EAJE', themes:['social','aude'], def:"Nombre d'établissements d'accueil du jeune enfant (crèches, multi-accueils, haltes-garderies…) recensés dans l'Aude."},
+    {url:'cd11_mds', label:'Maisons De la Solidarité', themes:['social','aude'], def:"Nombre de Maisons de la Solidarité, lieux d'accueil de proximité des services sociaux du Département de l'Aude."},
   ];
   
   for (var i=0; i<datasets.length; i++) {
@@ -1429,7 +1638,7 @@ async function loadAude() {
           has_ts: false,
           source: 'Open Data Aude',
           annee: new Date().getFullYear(),
-          desc: 'Nombre d\''+ds.label+' dans le département de l\'Aude.',
+          desc: ds.def,
           isNew: isNew
         });
       }
@@ -1530,11 +1739,14 @@ async function loadINSEE() {
     addLog('ℹ️', 'INSEE (' + ds1 + ') : ' + obsA.length + ' observations pour l\'Aude, dimensions → ' + dimsInfo.join(' ; '));
     var all = await allDeps(ds1, obsA, ['AGE']);
     var src = all || obsA;
-    var pool = reduceTotals(src.filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === period; }), ['AGE']);
-    var perDep = {};
-    pool.forEach(function(o) {
-      var c = depCode(o), v = val(o); if (!c || v === null) return;
-      (perDep[c] = perDep[c] || {})[dim(o, 'AGE')] = v;
+    var poolAll = reduceTotals(src, ['AGE']);
+    var byP = {};
+    poolAll.forEach(function(o) {
+      var pe = String(dim(o, 'TIME_PERIOD')), c = depCode(o), v = val(o);
+      if (!c || v === null) return;
+      if (!byP[pe]) byP[pe] = {};
+      if (!byP[pe][c]) byP[pe][c] = {};
+      byP[pe][c][dim(o, 'AGE')] = v;
     });
     var defs = [
       ['insee_pop',    'Population totale',            'hab.', 'int',  function(d) { return d._T; },                                      'Population du département (recensement, INSEE).', ['demographie']],
@@ -1545,11 +1757,22 @@ async function loadINSEE() {
       ['insee_a2064',  'Part des 20-64 ans',           '%',    'pct1', function(d) { return d._T && d.Y20T64 != null ? d.Y20T64 / d._T * 100 : null; }, 'Part des 20-64 ans dans la population (recensement INSEE).', ['demographie']],
       ['insee_ivieil', 'Indice de vieillissement',     '',     'dec1', function(d) { return d.Y_GE65 != null && d.Y_LT20 ? d.Y_GE65 / d.Y_LT20 * 100 : null; }, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']]
     ];
+    function meanOf(arr) { return arr.reduce(function(a, b) { return a + b; }, 0) / arr.length; }
     defs.forEach(function(df) {
-      var snap = {};
-      Object.keys(perDep).forEach(function(c) { var v = df[4](perDep[c]); if (v !== null && v !== undefined && !isNaN(v)) snap[c] = v; });
+      var snap = {}, sAude = {}, sFra = {}, sOcc = {};
+      Object.keys(byP).sort().forEach(function(pe) {
+        var snapP = {};
+        Object.keys(byP[pe]).forEach(function(c) { var v = df[4](byP[pe][c]); if (v !== null && v !== undefined && !isNaN(v)) snapP[c] = v; });
+        if (snapP['11'] !== undefined) sAude[pe] = snapP['11'];
+        var allV = Object.keys(snapP).map(function(c) { return snapP[c]; });
+        if (allV.length >= 20) sFra[pe] = meanOf(allV);
+        var occV = OCC.map(function(c) { return snapP[c]; }).filter(function(v) { return v !== undefined; });
+        if (occV.length) sOcc[pe] = meanOf(occV);
+        if (pe === period) snap = snapP;
+      });
       if (snap['11'] === undefined) { addLog('⚠️', 'INSEE : ' + df[1] + ' non calculable (tranches d\'âge absentes).'); return; }
       put(df[0], df[1], df[2], df[3], snap['11'], period, df[5], df[6], snap);
+      if (setTs(df[0], '11', sAude)) { setTs(df[0], 'FRA', sFra); setTs(df[0], 'OCC', sOcc); }
     });
   } catch (e) {
     addLog('⚠️', 'INSEE (population par âge) : ' + e.message + '. Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.');
@@ -1705,6 +1928,32 @@ var DREES_RULES = [
   { id:'ind35', ds:'enfance', exact:"Nombre de places en établissement d’aide sociale à l’enfance pour 1 000 jeunes de 0 à 20 ans", label:"Places en établissement ASE / 1 000 jeunes", unit:'‰', fmt:'dec1', themes:['ase'], desc:"Places en établissement d'aide sociale à l'enfance pour 1 000 jeunes de 0 à 20 ans." }
 ];
 
+// Enregistre une série {année: valeur} dans DREES_TS (au moins 2 points pour tracer une courbe)
+function setTs(id, code, series) {
+  var ok = {};
+  Object.keys(series || {}).forEach(function(y) { var v = series[y]; if (typeof v === 'number' && !isNaN(v)) ok[y] = v; });
+  if (Object.keys(ok).length < 2) return false;
+  (DREES_TS[id] = DREES_TS[id] || {})[code] = ok;
+  return true;
+}
+// Exécute des tâches asynchrones avec au plus n requêtes en parallèle
+async function runPool(tasks, n) {
+  var i = 0;
+  async function worker() { while (i < tasks.length) { var t = tasks[i++]; try { await t(); } catch (e) { /* géré par la tâche */ } } }
+  await Promise.all(Array.from({ length: n }, worker));
+}
+// Moyenne annuelle d'un indicateur DREES (France ou Occitanie) calculée côté serveur (group_by)
+async function fetchDreesAgg(dsKey, labelField, yearField, exact, extraWhere, scale) {
+  var where = labelField + '="' + exact + '"' + (extraWhere || '');
+  var url = DREES_BASE + DREES_RESOLVED_ID[dsKey] + '/records?select=' + encodeURIComponent(yearField + ', avg(value) as moy') +
+    '&where=' + encodeURIComponent(where) + '&group_by=' + encodeURIComponent(yearField) + '&order_by=' + encodeURIComponent(yearField) + '&limit=100';
+  var r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  var d = await r.json(), out = {};
+  (d.results || []).forEach(function(x) { if (x.moy != null && x[yearField] != null) out[x[yearField]] = x.moy * (scale || 1); });
+  return out;
+}
+
 // Calcule n / moyenne / médiane / quartiles sur un tableau de valeurs numériques.
 // Fonction générique, réutilisée par le connecteur DREES ET le connecteur CAF.
 function computeStats(vals) {
@@ -1773,6 +2022,7 @@ async function loadDREES() {
   if (typeof DREES_META === 'undefined') window.DREES_META = [];
   var prevIds = DREES_META.map(function(m) { return m.id; });
   var updated = 0;
+  var tsTasks = [];
 
   for (var ri = 0; ri < DREES_RULES.length; ri++) {
     var rule = DREES_RULES[ri];
@@ -1805,6 +2055,15 @@ async function loadDREES() {
     entry.isNew = isNew;
     if (!existing) DREES_META.push(entry);
 
+    // Série de l'Aude sur toutes les années publiées (lignes déjà lues, aucune requête supplémentaire)
+    var audeSeries = {};
+    cands.forEach(function(c) {
+      var y = yearField ? c[yearField] : null, v = c.value;
+      if (y == null || audeSeries[y] !== undefined || v === null || v === undefined || v === '') return;
+      audeSeries[y] = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (rule.scale || 1);
+    });
+    if (setTs(rule.id, '11', audeSeries)) { entry.has_ts = true; tsTasks.push({ rule: rule, labelField: labelField, yearField: yearField }); }
+
     var codeIsd = rec.code_isd;
     var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee, rule.scale, labelField, rule.exact) : null;
     if (snapMap && Object.keys(snapMap).length > 1) {
@@ -1828,6 +2087,21 @@ async function loadDREES() {
     updated++;
   }
 
+  if (tsTasks.length) {
+    var tsErr = null, tsOk = 0, jobs = [];
+    tsTasks.forEach(function(t) {
+      [['FRA', ''], ['OCC', ' AND lib_reg="Occitanie"']].forEach(function(cfg) {
+        jobs.push(async function() {
+          try {
+            var ser = await fetchDreesAgg(t.rule.ds, t.labelField, t.yearField, t.rule.exact, cfg[1], t.rule.scale);
+            if (setTs(t.rule.id, cfg[0], ser)) tsOk++;
+          } catch (e) { tsErr = tsErr || e.message; }
+        });
+      });
+    });
+    await runPool(jobs, 6);
+    addLog(tsOk ? 'ℹ️' : '⚠️', 'DREES : évolution — série de l\'Aude pour ' + tsTasks.length + ' indicateurs ; moyennes France/Occitanie : ' + tsOk + '/' + (tsTasks.length * 2) + (tsErr ? ' (erreur : ' + tsErr + ')' : '') + '.');
+  }
   addLog(updated ? '✅' : '⚠️', 'DREES : ' + updated + '/' + DREES_RULES.length + ' indicateurs mis à jour en direct.');
 }
 
