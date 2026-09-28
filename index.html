@@ -1287,24 +1287,29 @@ async function loadCAF() {
     // juste une colonne par indicateur, directement comparable department par département.
     var natMap = {}; // { [key]: {dept: valeur} }
     try {
-      var natUrl = 'https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy/records?limit=100&where='+encodeURIComponent('dtreffre="'+dateRef+'"');
-      var rNat = await fetch(natUrl);
-      if (rNat.ok) {
-        var dataNat = await rNat.json();
-        var natRows = dataNat.results || [];
-        addLog('ℹ️', 'CAF : comparatif national récupéré sur '+natRows.length+' départements (période '+dateRef+').');
-        natRows.forEach(function(rr) {
-          var dc = rr.numdep;
-          if (dc == null) return;
-          Object.keys(rr).forEach(function(k) {
-            if (rr[k] === null || rr[k] === undefined) return;
-            if (!natMap[k]) natMap[k] = {};
-            natMap[k][dc] = rr[k];
-          });
-        });
-      } else {
-        addLog('⚠️', 'CAF : comparatif national indisponible (HTTP '+rNat.status+'), valeurs Aude seules.');
+      // Pas de « where » sur la date (le champ n'accepte pas la comparaison texte → HTTP 400) :
+      // on lit les lignes triées par date décroissante et on garde celles de la période de l'Aude.
+      var natRows = [];
+      for (var pg = 0; pg < 3; pg++) {
+        var natUrl = 'https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy/records?limit=100&offset='+(pg*100)+'&order_by='+encodeURIComponent('dtreffre DESC');
+        var rNat = await fetch(natUrl);
+        if (!rNat.ok) { addLog('⚠️', 'CAF : comparatif national indisponible (HTTP '+rNat.status+'), valeurs Aude seules.'); break; }
+        var dNat = await rNat.json();
+        var resNat = dNat.results || [];
+        var samePeriod = resNat.filter(function(rr) { return rr.dtreffre === rec.dtreffre; });
+        natRows = natRows.concat(samePeriod);
+        if (samePeriod.length < 100) break;
       }
+      if (natRows.length) addLog('ℹ️', 'CAF : comparatif national récupéré sur '+natRows.length+' départements (période '+dateRef+').');
+      natRows.forEach(function(rr) {
+        if (rr.numdep == null) return;
+        var dc = String(rr.numdep); if (dc.length === 1) dc = '0' + dc;
+        Object.keys(rr).forEach(function(k) {
+          if (typeof rr[k] !== 'number') return;
+          if (!natMap[k]) natMap[k] = {};
+          natMap[k][dc] = rr[k];
+        });
+      });
     } catch (eNat) {
       addLog('⚠️', 'CAF : comparatif national indisponible ('+eNat.message+'), valeurs Aude seules.');
     }
@@ -1436,50 +1441,81 @@ async function loadAude() {
 }
 
 async function loadINSEE() {
-  // Aucune valeur écrite en dur : on interroge l'API Melodi de l'INSEE (population du département 11).
-  // Les valeurs « 375100 » et « 9,6 % » qui figuraient ici auparavant n'avaient pas de source vérifiée : supprimées.
-  addLog('⏳', 'INSEE : interrogation de l\'API Melodi (population, département 11)...');
+  // Aucune valeur écrite en dur : tout vient de l'API Melodi de l'INSEE (recensement, département 11).
+  addLog('⏳', 'INSEE : interrogation de l\'API Melodi (population par âge, département 11)...');
   var base = 'https://api.insee.fr/melodi/data/DS_RP_POPULATION_PRINC';
-  var geoCandidates = ['DEP-11', '2023-DEP-11', '2022-DEP-11', '2021-DEP-11'];
-  var found = null, lastErr = null;
-  for (var gi = 0; gi < geoCandidates.length && !found; gi++) {
-    var url = base + '?GEO=' + encodeURIComponent(geoCandidates[gi]) + '&maxResult=1000';
+  var obs = null, lastErr = null;
+  var geoCandidates = ['DEP-11', '2023-DEP-11', '2022-DEP-11'];
+  for (var gi = 0; gi < geoCandidates.length && !obs; gi++) {
     try {
-      var r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      var r = await fetch(base + '?GEO=' + encodeURIComponent(geoCandidates[gi]) + '&maxResult=1000', { headers: { 'Accept': 'application/json' } });
       if (!r.ok) { lastErr = 'HTTP ' + r.status + ' (GEO=' + geoCandidates[gi] + ')'; continue; }
       var data = await r.json();
-      var obs = data.observations || [];
-      if (!obs.length) { lastErr = '0 observation (GEO=' + geoCandidates[gi] + ', clés reçues : ' + Object.keys(data).join(', ') + ')'; continue; }
-      // On garde la ligne « tous âges / tous sexes » la plus récente
-      var totals = obs.filter(function(o) {
-        var d = o.dimensions || {};
-        return Object.keys(d).every(function(k) { return k === 'GEO' || k === 'TIME_PERIOD' || k === 'FREQ' || d[k] === '_T' || d[k] === 'Y_GE0' || k === 'RP_MEASURE' || k === 'UNIT_MEASURE'; });
-      });
-      var pool = totals.length ? totals : obs;
-      pool.sort(function(a, b) { return String((b.dimensions||{}).TIME_PERIOD).localeCompare(String((a.dimensions||{}).TIME_PERIOD)); });
-      var m0 = pool[0].measures || {};
-      var mv = m0.OBS_VALUE_NIVEAU || m0.OBS_VALUE || m0[Object.keys(m0)[0]] || {};
-      var v = (typeof mv === 'object') ? mv.value : mv;
-      if (v === undefined || v === null || isNaN(parseFloat(v))) { lastErr = 'valeur illisible (mesures : ' + Object.keys(m0).join(', ') + ')'; continue; }
-      found = { val: parseFloat(v), annee: (pool[0].dimensions || {}).TIME_PERIOD || null, geo: geoCandidates[gi] };
+      if ((data.observations || []).length) obs = data.observations; else lastErr = '0 observation (GEO=' + geoCandidates[gi] + ')';
     } catch (e) { lastErr = e.message + ' (GEO=' + geoCandidates[gi] + ')'; }
   }
-  if (!found) {
-    addLog('⚠️', 'INSEE : aucune donnée récupérée (' + lastErr + '). Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.');
-    return;
+  if (!obs) { addLog('⚠️', 'INSEE : aucune donnée récupérée (' + lastErr + '). Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.'); return; }
+
+  function dim(o, k) { return (o.dimensions || {})[k]; }
+  function measure(o) {
+    var m = o.measures || {}, mv = m.OBS_VALUE_NIVEAU || m.OBS_VALUE || m[Object.keys(m)[0]] || {};
+    var v = (typeof mv === 'object') ? mv.value : mv;
+    return (v === undefined || v === null || isNaN(parseFloat(v))) ? null : parseFloat(v);
   }
-  var existing = INSEE_META.find(function(m) { return m.id === 'insee_pop'; });
-  var entry = existing || {
-    id: 'insee_pop', label: 'Population totale', unit: 'hab.', fmt: 'int', themes: ['social', 'ages'],
-    occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
-    total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false,
-    desc: 'Population du département de l\'Aude (recensement, INSEE).'
-  };
-  entry.aude = found.val; entry.annee = found.annee;
-  entry.source = 'INSEE — API Melodi (direct)';
-  entry.isNew = !existing;
-  if (!existing) INSEE_META.push(entry);
-  addLog('✅', 'INSEE : population Aude = ' + found.val + ' (' + found.annee + ', GEO=' + found.geo + ')', !existing);
+  // Période la plus récente, tous sexes confondus, autres dimensions ramenées à leur total (_T) quand il existe
+  var periods = Array.from(new Set(obs.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
+  var period = periods[periods.length - 1];
+  var pool = obs.filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === period; });
+  var skip = { GEO: 1, TIME_PERIOD: 1, AGE: 1, FREQ: 1, UNIT_MEASURE: 1 };
+  var dimNames = Object.keys(pool[0].dimensions || {}).filter(function(k) { return !skip[k]; });
+  dimNames.forEach(function(k) {
+    var vals = Array.from(new Set(pool.map(function(o) { return dim(o, k); })));
+    if (vals.length > 1 && vals.indexOf('_T') >= 0) pool = pool.filter(function(o) { return dim(o, k) === '_T'; });
+  });
+  var ages = Array.from(new Set(pool.map(function(o) { return dim(o, 'AGE'); })));
+  addLog('ℹ️', 'INSEE : période ' + period + ', ' + pool.length + ' observations, tranches d\'âge : ' + ages.slice(0, 40).join(', ') + (ages.length > 40 ? '…' : ''));
+
+  function ageRange(c) {
+    var m;
+    if ((m = /^Y_LT(\d+)$/.exec(c))) return [0, +m[1] - 1];
+    if ((m = /^Y_GE(\d+)$/.exec(c))) return [+m[1], 999];
+    if ((m = /^Y(\d+)T(\d+)$/.exec(c))) return [+m[1], +m[2]];
+    if ((m = /^Y(\d+)$/.exec(c))) return [+m[1], +m[1]];
+    return null;
+  }
+  var items = [], total = null;
+  pool.forEach(function(o) {
+    var a = dim(o, 'AGE'), v = measure(o);
+    if (v === null) return;
+    if (a === '_T') { total = v; return; }
+    var rg = ageRange(a); if (rg) items.push({ lo: rg[0], hi: rg[1], v: v });
+  });
+  // Feuilles = tranches qui n'en contiennent pas d'autres (évite les doubles comptes si plusieurs granularités)
+  var leaves = items.filter(function(x) {
+    return !items.some(function(y) { return y !== x && x.lo <= y.lo && x.hi >= y.hi && (x.lo < y.lo || x.hi > y.hi); });
+  });
+  if (total === null) total = leaves.reduce(function(s, x) { return s + x.v; }, 0);
+  function alignedAt(b) { return !leaves.some(function(x) { return x.lo < b && x.hi >= b; }); }
+  function sum(lo, hi) { return leaves.filter(function(x) { return x.lo >= lo && x.hi <= hi; }).reduce(function(s, x) { return s + x.v; }, 0); }
+
+  function put(id, label, unit, fmtName, val, desc, themes) {
+    var existing = INSEE_META.find(function(m) { return m.id === id; });
+    var e = existing || { id: id, label: label, unit: unit, fmt: fmtName, themes: themes,
+      occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
+      total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false, desc: desc };
+    e.aude = val; e.annee = period; e.source = 'INSEE — API Melodi (direct)'; e.isNew = !existing;
+    if (!existing) INSEE_META.push(e);
+    addLog('✅', 'INSEE : ' + label + ' = ' + (Math.round(val * 100) / 100) + ' ' + unit + ' (' + period + ')', !existing);
+  }
+  put('insee_pop', 'Population totale', 'hab.', 'int', total, 'Population du département de l\'Aude (recensement, INSEE).', ['demographie']);
+  if (leaves.length && total > 0) {
+    if (alignedAt(75)) put('insee_p75', 'Part des 75 ans et plus', '%', 'pct1', sum(75, 999) / total * 100, 'Part des 75 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']);
+    if (alignedAt(65)) put('insee_p65', 'Part des 65 ans et plus', '%', 'pct1', sum(65, 999) / total * 100, 'Part des 65 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']);
+    if (alignedAt(20)) put('insee_m20', 'Part des moins de 20 ans', '%', 'pct1', sum(0, 19) / total * 100, 'Part des moins de 20 ans dans la population (recensement INSEE).', ['demographie', 'ase']);
+    if (alignedAt(20) && alignedAt(65) && sum(0, 19) > 0) put('insee_ivieil', 'Indice de vieillissement', '', 'dec1', sum(65, 999) / sum(0, 19) * 100, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']);
+  } else {
+    addLog('⚠️', 'INSEE : tranches d\'âge non exploitables, seule la population totale est affichée.');
+  }
 }
 
 // ============================================================
@@ -1556,48 +1592,50 @@ function findDreesLabelField(fields) {
   var byName = fields.find(function(f) { return exact.indexOf(normFr(f.name)) >= 0; });
   return byName ? byName.name : null;
 }
-// Sélectionne la meilleure LIGNE d'un jeu long-format pour un indicateur donné.
-// - rule.phrase : sous-chaîne exacte (texte fusionné, insensible à la ponctuation) — priorité, sans ambiguïté.
-// - rule.kw/ex  : score par mots-clés (au moins un mot-clé présent, score le plus haut gagne).
-function bestDreesRow(rows, labelField, yearField, rule) {
-  if (rule.phrase) {
-    var direct = rows.filter(function(rec) { return fuseFr(rec[labelField] || '').indexOf(rule.phrase) >= 0; });
-    direct.sort(function(a, b) { var ya = yearField ? (a[yearField]||0) : 0, yb = yearField ? (b[yearField]||0) : 0; return yb - ya; });
-    return direct[0] || null;
-  }
-  var scored = rows.map(function(rec) {
-    var lbl = normFr(rec[labelField] || '');
-    var score = rule.kw.reduce(function(s, k) { return s + (lbl.indexOf(k) >= 0 ? 1 : 0); }, 0);
-    if (rule.ex && rule.ex.some(function(x) { return lbl.indexOf(x) >= 0; })) score = -99;
-    return { rec: rec, score: score };
-  }).filter(function(x) { return x.score > 0; }).sort(function(a, b) {
-    if (b.score !== a.score) return b.score - a.score;
-    var ya = yearField ? (a.rec[yearField] || 0) : 0, yb = yearField ? (b.rec[yearField] || 0) : 0;
-    return yb - ya;
-  });
-  return scored[0] ? scored[0].rec : null;
+// Sélection d'une LIGNE par libellé EXACT (insensible à la casse, aux accents, à la ponctuation).
+// Le jeu contient de nombreux libellés proches (« Part des AED dans l'ensemble des mesures d'ASE »
+// vs « Taux de mesures d'ASE »…) : une correspondance par mots-clés donnait de mauvais indicateurs.
+function dreesCandidates(rows, labelField, yearField, rule) {
+  var target = fuseFr(rule.exact);
+  return rows.filter(function(rec) { return fuseFr(rec[labelField] || '') === target; })
+    .sort(function(a, b) { var ya = yearField ? (a[yearField] || 0) : 0, yb = yearField ? (b[yearField] || 0) : 0; return yb - ya; });
 }
 
-// Règles indicateur ⇄ jeu de données + mots-clés/phrase de désambiguïsation, avec la définition
-// (métadonnée éditoriale, pas une valeur chiffrée — celle-ci vient de l'API à chaque rechargement).
+// Lit toutes les pages d'un jeu (100 lignes max par appel) — sans ça, seules 100 lignes
+// arbitraires (souvent d'anciennes années) étaient vues pour l'Aude.
+async function fetchDreesPages(dsKey, whereClause, maxPages) {
+  var id = DREES_RESOLVED_ID[dsKey], all = [];
+  for (var p = 0; p < (maxPages || 8); p++) {
+    var url = DREES_BASE + id + '/records?where=' + encodeURIComponent(whereClause) + '&limit=100&offset=' + (p * 100);
+    var r = await fetch(url);
+    if (!r.ok) { if (p === 0) throw new Error('HTTP ' + r.status); break; }
+    var data = await r.json();
+    var res = data.results || [];
+    all = all.concat(res);
+    if (res.length < 100) break;
+  }
+  return all;
+}
+
+// Indicateurs = libellés officiels EXACTS relevés dans le journal (jeux 619 et 596). Métadonnées éditoriales uniquement :
+// la valeur vient toujours de l'API.
 var DREES_RULES = [
-  { id:'ind41', ds:'financiers', kw:['rsa','habitant'],     label:'Dépenses RSA / habitant', unit:'€', fmt:'eur0', themes:['social','financier'], desc:"Dépenses de RSA rapportées à la population du département." },
-  { id:'ind42', ds:'financiers', kw:['rsa','beneficiaire'], label:'Dépenses RSA / bénéficiaire', unit:'€', fmt:'eur0', themes:['social','financier'], desc:"Dépenses de RSA rapportées au nombre de bénéficiaires." },
-  { id:'ind43', ds:'financiers', kw:['apa','habitant'],     label:'Dépenses APA / habitant', unit:'€', fmt:'eur0', themes:['ages','financier'], desc:"Dépenses d'APA rapportées à la population du département." },
-  { id:'ind46', ds:'financiers', kw:['total','habitant'],   label:'Dépenses totales aide sociale / habitant', unit:'€', fmt:'eur0', themes:['financier'], desc:"Dépenses totales d'aide sociale départementale rapportées à la population." },
-  { id:'ind09', ds:'financiers', kw:['pch','beneficiaire'], label:'Dépenses PCH / bénéficiaire', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses de PCH rapportées au nombre de bénéficiaires." },
-  // Tentatives : la DREES indique que ce jeu couvre les 4 grandes catégories (RSA, ASE, PH, PA) —
-  // ces deux lignes existent peut-être déjà parmi celles qu'on récupère pour l'Aude, jamais cherchées jusqu'ici.
-  { id:'ind07', ds:'financiers', kw:['agees','habitant'], ex:['apa'], label:'Dépenses aide sociale personnes âgées / habitant', unit:'€', fmt:'eur0', themes:['ages','financier'], desc:"Dépenses d'aide sociale aux personnes âgées (hors APA seule) rapportées à la population." },
-  { id:'ind10', ds:'financiers', kw:['handicap','habitant'], ex:['pch'], label:'Dépenses aide sociale personnes handicapées / habitant', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses d'aide sociale aux personnes handicapées (hors PCH seule) rapportées à la population." },
-  { id:'ind31', ds:'enfance', phrase:'mesuresdase',            label:'Taux mesures ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures d'aide sociale à l'enfance (accueil + actions éducatives) pour 1000 jeunes de moins de 21 ans." },
-  { id:'ind32', ds:'enfance', phrase:'aedetaemo',              label:'Taux actions éducatives ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Actions éducatives (AED+AEMO) pour 1000 jeunes de moins de 21 ans." },
-  { id:'ind33', ds:'enfance', phrase:'enfantsaccueillis',      label:'Taux mesures accueil ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures de placement pour 1000 jeunes de moins de 21 ans." },
-  { id:'ind34', ds:'enfance', phrase:'jugeestsaisi',           label:'Part mineurs saisine juge enfants', unit:'%', fmt:'pct1', themes:['ase'], desc:"Part de mineurs faisant l'objet d'une saisine du juge des enfants en assistance éducative." },
-  { id:'ind35', ds:'enfance', phrase:'nombredeplacesenetablissement', label:"Taux d'équipement établissements ASE", unit:'‰', fmt:'dec1', themes:['ase'], desc:"Places en établissements habilités ASE pour 1000 jeunes de moins de 21 ans." }
-  // ind07/08/10/11 (dépenses nettes/brutes PA-PH en k€) : pas de table interrogeable trouvée à ce
-  // jour côté DREES pour ces montants bruts — seuls des fichiers Excel sont publiés. Voir message
-  // de session : à reprendre via téléchargement + parsing du fichier officiel si besoin plus tard.
+  { id:'ind41', ds:'financiers', exact:"Dépenses brutes de RSA par habitant", label:'Dépenses RSA / habitant', unit:'€', fmt:'eur0', themes:['social','financier'], desc:"Dépenses brutes de RSA rapportées à la population du département." },
+  { id:'ind42', ds:'financiers', exact:"Dépenses brutes de RSA par bénéficiaire", label:'Dépenses RSA / bénéficiaire', unit:'€', fmt:'eur0', themes:['social','financier'], desc:"Dépenses brutes de RSA rapportées au nombre de bénéficiaires." },
+  { id:'ind43', ds:'financiers', exact:"Dépenses brutes d'APA, par habitant", label:'Dépenses APA / habitant', unit:'€', fmt:'eur0', themes:['ages','financier'], desc:"Dépenses brutes d'APA rapportées à la population du département." },
+  { id:'ind44', ds:'financiers', exact:"Dépenses brutes d'APA, par bénéficiaire", label:'Dépenses APA / bénéficiaire', unit:'€', fmt:'eur0', themes:['ages','financier'], desc:"Dépenses brutes d'APA rapportées au nombre de bénéficiaires." },
+  { id:'ind46', ds:'financiers', exact:"Dépenses totales brutes d'aide sociale par habitant", label:'Dépenses totales aide sociale / habitant', unit:'€', fmt:'eur0', themes:['financier'], desc:"Dépenses totales brutes d'aide sociale départementale rapportées à la population." },
+  { id:'ind45', ds:'financiers', exact:"Dépenses brutes de PCH et d'ACTP, par habitant", label:'Dépenses PCH-ACTP / habitant', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses brutes de PCH et d'ACTP rapportées à la population." },
+  { id:'ind09', ds:'financiers', exact:"Dépenses brutes de PCH et d'ACTP, par bénéficiaire", label:'Dépenses PCH-ACTP / bénéficiaire', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses brutes de PCH et d'ACTP rapportées au nombre de bénéficiaires." },
+  { id:'ind47', ds:'financiers', exact:"Dépenses brutes d'aide à l'accueil pour personnes handicapées par habitant", label:'Dépenses aide à l\'accueil PH / habitant', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses brutes d'aide à l'accueil des personnes handicapées rapportées à la population." },
+  { id:'ind48', ds:'financiers', exact:"Dépenses brutes d'aide à l'accueil pour personnes handicapées par bénéficiaire", label:'Dépenses aide à l\'accueil PH / bénéficiaire', unit:'€', fmt:'eur0', themes:['handicap','financier'], desc:"Dépenses brutes d'aide à l'accueil des personnes handicapées rapportées au nombre de bénéficiaires." },
+  { id:'ind49', ds:'financiers', exact:"Dépenses brutes de placement de l'ASE par habitant", label:'Dépenses placement ASE / habitant', unit:'€', fmt:'eur0', themes:['ase','financier'], desc:"Dépenses brutes de placement de l'ASE rapportées à la population." },
+  { id:'ind50', ds:'financiers', exact:"Dépenses brutes de placement de l'ASE par bénéficiaire", label:'Dépenses placement ASE / bénéficiaire', unit:'€', fmt:'eur0', themes:['ase','financier'], desc:"Dépenses brutes de placement de l'ASE rapportées au nombre de bénéficiaires." },
+  { id:'ind31', ds:'enfance', exact:"Taux de mesures d'ASE (mesures de placements et actions éducatives) en % des 0-20 ans", label:'Taux mesures ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures d'aide sociale à l'enfance (placements + actions éducatives) rapportées à la population des 0-20 ans." },
+  { id:'ind32', ds:'enfance', exact:"Taux d'actions éducatives (AED et AEMO) dans la population des 0-20 ans", label:'Taux actions éducatives ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Actions éducatives (AED + AEMO) rapportées à la population des 0-20 ans." },
+  { id:'ind33', ds:'enfance', exact:"Taux de mesures de placement (enfants accueillis à l'ASE) dans la population des 0-20 ans", label:'Taux mesures accueil ASE', unit:'‰', fmt:'dec1', themes:['ase'], desc:"Mesures de placement (enfants accueillis à l'ASE) rapportées à la population des 0-20 ans." },
+  { id:'ind34', ds:'enfance', exact:"Part des mineurs dont le juge est saisi", label:'Part mineurs saisine juge enfants', unit:'%', fmt:'pct1', themes:['ase'], desc:"Part des mineurs dont le juge des enfants est saisi en assistance éducative." },
+  { id:'ind35', ds:'enfance', exact:"Nombre de places en établissement d’aide sociale à l’enfance pour 1 000 jeunes de 0 à 20 ans", label:"Places en établissement ASE / 1 000 jeunes", unit:'‰', fmt:'dec1', themes:['ase'], desc:"Places en établissement d'aide sociale à l'enfance pour 1 000 jeunes de 0 à 20 ans." }
 ];
 
 // Calcule n / moyenne / médiane / quartiles sur un tableau de valeurs numériques.
@@ -1611,7 +1649,6 @@ function computeStats(vals) {
 }
 // Classe les départements d'un snap {dept: valeur} (rang 1 = valeur la plus haute), filtré
 // optionnellement sur une liste de codes (Occitanie / Strate), et calcule les stats associées.
-// Générique, réutilisée par le connecteur DREES ET le connecteur CAF.
 function statsAndRankFor(snapMap, deptFilter) {
   var entries = Object.keys(snapMap)
     .filter(function(d) { return !deptFilter || deptFilter.indexOf(d) >= 0; })
@@ -1638,38 +1675,27 @@ async function loadDREES() {
       var yearField = findDreesDim(fields, 'annee');
       var labelField = findDreesLabelField(fields);
       if (!deptField || !labelField) { addLog('⚠️', 'DREES (' + dsKey + ') : champ département ou libellé introuvable.'); continue; }
-      var id = DREES_RESOLVED_ID[dsKey];
-      var url = DREES_BASE + id + '/records?where=' + encodeURIComponent(deptField + '="11"') + '&limit=100';
-      var r = await fetch(url);
-      if (!r.ok) { addLog('❌', 'DREES (' + dsKey + ') : HTTP ' + r.status); continue; }
-      var data = await r.json();
-      var rows = data.results || [];
+      var rows = await fetchDreesPages(dsKey, deptField + '="11"', 8);
       if (!rows.length) { addLog('⚠️', 'DREES (' + dsKey + ') : 0 ligne pour l\'Aude (champ « ' + deptField + ' »).'); continue; }
       rowsByDs[dsKey] = rows; labelFieldByDs[dsKey] = labelField; yearFieldByDs[dsKey] = yearField; deptFieldByDs[dsKey] = deptField;
-      addLog('ℹ️', 'DREES (' + dsKey + ') : format long détecté (colonnes « ' + labelField + ' » / « value »), ' + rows.length + ' lignes pour code_dep="11".');
-      var uniqueLabels = Array.from(new Set(rows.map(function(r){ return r[labelField]; })));
-      addLog('ℹ️', 'DREES (' + dsKey + ') : libellés disponibles → ' + uniqueLabels.join(' | '));
+      var yrs = yearField ? Array.from(new Set(rows.map(function(x){ return x[yearField]; }))).sort().join(', ') : '?';
+      addLog('ℹ️', 'DREES (' + dsKey + ') : ' + rows.length + ' lignes lues pour l\'Aude (années : ' + yrs + ').');
     } catch (e) {
       addLog('❌', 'DREES (' + dsKey + ') : erreur de connexion — ' + e.message);
     }
   }
 
-  // Récupère la valeur des 95 autres départements pour un indicateur déjà identifié (même code_isd + même année),
-  // pour reconstituer moyenne/médiane/quartiles/rangs — sans quoi on n'a que la valeur brute de l'Aude.
+  // Valeur des autres départements pour un indicateur identifié (même code_isd + même année),
+  // pour reconstituer moyenne/médiane/quartiles/rangs.
   async function fetchDreesComparatif(dsKey, deptField, codeIsd, yearField, annee) {
     if (!codeIsd || !yearField || annee == null) return null;
     try {
-      var url = DREES_BASE + DREES_RESOLVED_ID[dsKey] + '/records?where=' +
-        encodeURIComponent('code_isd="' + codeIsd + '" AND ' + yearField + '=' + annee) + '&limit=100';
-      var r = await fetch(url);
-      if (!r.ok) return null;
-      var data = await r.json();
-      var rows = data.results || [];
+      var rows = await fetchDreesPages(dsKey, 'code_isd="' + codeIsd + '" AND ' + yearField + '=' + annee, 3);
       var snapMap = {};
       rows.forEach(function(rr) {
         var dc = rr[deptField], v = rr.value;
         if (dc == null || v === null || v === undefined || v === '') return;
-        snapMap[dc] = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v;
+        snapMap[String(dc)] = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v;
       });
       return snapMap;
     } catch (e) { return null; }
@@ -1683,10 +1709,17 @@ async function loadDREES() {
     var rule = DREES_RULES[ri];
     var rows = rowsByDs[rule.ds], labelField = labelFieldByDs[rule.ds], yearField = yearFieldByDs[rule.ds], deptField = deptFieldByDs[rule.ds];
     if (!rows) continue;
-    var rec = bestDreesRow(rows, labelField, yearField, rule);
-    if (!rec) { addLog('⚠️', rule.id + ' : aucune ligne ne correspond parmi ' + rows.length + ' lignes.'); continue; }
+    var cands = dreesCandidates(rows, labelField, yearField, rule);
+    if (!cands.length) { addLog('⚠️', rule.id + ' : libellé « ' + rule.exact + ' » absent pour l\'Aude.'); continue; }
+    var rec = cands[0];
+    var sameYear = cands.filter(function(c) { return !yearField || c[yearField] === rec[yearField]; });
+    var distinctVals = Array.from(new Set(sameYear.map(function(c) { return c.value; })));
+    if (distinctVals.length > 1) {
+      addLog('⚠️', rule.id + ' : ' + sameYear.length + ' lignes de même libellé et même année avec des valeurs différentes → ' +
+        sameYear.map(function(c) { return '[' + c.code_isd + ' / ' + (c.source || 'source ?') + ' = ' + c.value + ']'; }).join(' ') + ' (première retenue).');
+    }
     var val = rec.value;
-    if (val === null || val === undefined || val === '') { addLog('⚠️', rule.id + ' : ligne trouvée (« ' + rec[labelField] + ' ») mais valeur vide.'); continue; }
+    if (val === null || val === undefined || val === '') { addLog('⚠️', rule.id + ' : ligne trouvée mais valeur vide.'); continue; }
     var aude = typeof val === 'string' ? parseFloat(val.replace(',', '.')) : val;
     var annee = yearField ? rec[yearField] : null;
     var isNew = prevIds.indexOf(rule.id) < 0;
@@ -1713,10 +1746,10 @@ async function loadDREES() {
       entry.stats_fr = frRes.stats; entry.rank_fr = frRes.rank; entry.total_fr = frRes.total; entry.fra = frRes.stats.mean;
       entry.stats_strate = strRes.stats; entry.rank_strate = strRes.rank; entry.total_strate = strRes.total;
       entry.stats_occ = occRes.stats; entry.rank_occ = occRes.rank; entry.total_occ = occRes.total; entry.occ = occRes.stats.mean;
-      addLog('✅', rule.id + ' (' + entry.label + ') : ' + aude + ' ' + (entry.unit || '') + ' — comparatif national sur ' + frRes.total + ' départements (moy. ' + entry.fra.toFixed(1) + '), année ' + annee, isNew);
+      addLog('✅', rule.id + ' (' + entry.label + ') : ' + aude + ' ' + (entry.unit || '') + ' — comparatif sur ' + frRes.total + ' départements (moy. ' + entry.fra.toFixed(2) + '), année ' + annee, isNew);
     } else {
       DREES_SNAP[rule.id] = { '11': aude };
-      addLog('⚠️', rule.id + ' : valeur Aude récupérée (' + aude + ') mais comparatif national indisponible (code_isd absent ou 0 résultat) — pas de moyenne/rang cette fois-ci.');
+      addLog('⚠️', rule.id + ' : valeur Aude récupérée (' + aude + ', ' + annee + ') mais comparatif national indisponible.');
     }
     updated++;
   }
