@@ -158,6 +158,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 @keyframes spin{to{transform:rotate(360deg)}}
 .badge-caf{background:#e8f8ee;color:#1a7a40;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
 .badge-aude{background:#e8f0f8;color:#3a6a9a;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
+.badge-cnsa{background:#e6f1fb;color:#0b5cad;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
 .badge-drees{background:#f0e8f8;color:#7a30c0;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
 .badge-insee{background:#e8f0f8;color:#3060a0;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
 
@@ -467,6 +468,7 @@ function buildCard(m) {
   var srcBadge = '';
   if (m.source && m.source.indexOf('CAF') >= 0) srcBadge = '<span class="badge-caf">CAF</span>';
   else if (m.source && m.source.indexOf('Open Data Aude') >= 0) srcBadge = '<span class="badge-aude">AUDE</span>';
+  else if (m.source && m.source.indexOf('CNSA') >= 0) srcBadge = '<span class="badge-cnsa">CNSA</span>';
   else if (m.source && m.source.indexOf('DREES') >= 0) srcBadge = '<span class="badge-drees">DREES</span>';
   else if (m.source && m.source.indexOf('INSEE') >= 0) srcBadge = '<span class="badge-insee">INSEE</span>';
   
@@ -1832,42 +1834,43 @@ async function loadCNSA() {
     if (!allRows.length) { addLog('⚠️', 'CNSA : le jeu ' + dsId + ' ne renvoie aucune ligne.'); return; }
 
     // 2) Détection du champ « code département » d'après les VALEURS réelles (et non le seul nom).
+    var cnsaNameToCode = {};
+    Object.keys(DREES_DEPTS).forEach(function(c) { cnsaNameToCode[normFrCnsa(DREES_DEPTS[c]).replace(/[^a-z0-9]/g, '')] = c; });
     function cnsaDeptCode(v) {
-      if (v === null || v === undefined) return null;
-      var m = String(v).trim().toUpperCase().match(/^0*(\d{1,3}|2[AB])(?=\D|$)/);
-      if (!m) return null;
-      var c = m[1];
-      return c.length === 1 ? '0' + c : c;
+      if (v === null || v === undefined || typeof v === 'boolean') return null;
+      var str = String(v).trim().toUpperCase();
+      var m = str.match(/^0*(\d{1,3}|2[AB])(?=\D|$)/);
+      if (m) { var c = m[1]; return c.length === 1 ? '0' + c : c; }
+      // Nom de département (« Aude », « Département de l'Aude », « 11 - Aude » déjà traité ci-dessus)
+      var nm = normFrCnsa(str).replace(/^departement (de la |de l'|du |des |de |d')?/, '').replace(/[^a-z0-9]/g, '');
+      return cnsaNameToCode[nm] || null;
     }
     var deptLike = fields.filter(function(f) {
-      var t = normFrCnsa(f.name + ' ' + (f.label || ''));
-      return /dep|geo|territoire|insee|code/.test(t);
+      var isText = allRows.some(function(rr) { return typeof rr[f.name] === 'string'; });
+      // Champs numériques : seulement s'ils portent un nom exact de code département
+      // (évite de prendre « depenses_… » pour un département).
+      var exactCode = ['dep', 'departement', 'code_dep', 'code_departement', 'num_dep', 'coddep', 'dept', 'codegeo', 'code_geo'].indexOf(normFrCnsa(f.name)) >= 0;
+      return isText || exactCode;
     });
     var codeField = null, bestScore = 0;
     deptLike.forEach(function(f) {
       var ok = 0;
       allRows.forEach(function(rr) { if (cnsaDeptCode(rr[f.name]) !== null) ok++; });
       var score = ok / allRows.length;
-      // Champs ressemblant à un millésime (2023…) exclus par cnsaDeptCode (4 chiffres) ; on exige 90 %.
       if (score >= 0.9 && score > bestScore) { bestScore = score; codeField = f.name; }
     });
     var nameField = null;
-    fields.forEach(function(f) {
-      if (nameField) return;
-      if (allRows.some(function(rr) { return normFrCnsa(rr[f.name]).trim() === 'aude'; })) nameField = f.name;
-    });
-    var depField = codeField || nameField;
+    var depField = codeField;
 
     // 3) Filtrage côté client : lignes de l'Aude, triées par année décroissante.
     function isAude(rr) {
-      if (codeField) return cnsaDeptCode(rr[codeField]) === '11';
-      return normFrCnsa(rr[nameField]).trim() === 'aude';
+      return cnsaDeptCode(rr[codeField]) === '11';
     }
     var rows11 = depField ? allRows.filter(isAude) : [];
     if (yearField) rows11.sort(function(a, b) { return String(b[yearField]).localeCompare(String(a[yearField])); });
     if (!rows11.length) {
       var sample = deptLike.slice(0, 4).map(function(f) { return f.name + '=' + JSON.stringify(allRows[0][f.name]); }).join(', ');
-      addLog('⚠️', 'CNSA : aucune ligne pour l\'Aude sur ' + dsId + ' (' + allRows.length + ' lignes lues, champ code=' + (codeField || 'introuvable') + ', champ nom=' + (nameField || 'introuvable') + '). Exemple : ' + sample);
+      addLog('⚠️', 'CNSA : aucune ligne pour l\'Aude sur ' + dsId + ' (' + allRows.length + ' lignes lues, champ code=' + (codeField || 'introuvable') + ', valeurs=' + JSON.stringify(allRows.slice(0, 3).map(function(rr) { return codeField ? rr[codeField] : null; })) + '). Exemple : ' + sample);
       return;
     }
     addLog('ℹ️', 'CNSA : ' + allRows.length + ' lignes lues, ' + rows11.length + ' pour l\'Aude (champ ' + depField + ').');
