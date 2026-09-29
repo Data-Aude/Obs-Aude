@@ -173,9 +173,19 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .pdf-sum th,.pdf-sum td{border:1px solid #d0e2f0;padding:3px 4px;text-align:right}
 .pdf-sum th{background:#eaf2fb;color:#1a4a6e;text-align:center}
 .pdf-sum td:first-child{text-align:left}
-.pdf-ind{border-top:2px solid #1a4a6e;margin-top:16px;padding-top:6px;page-break-inside:avoid;break-inside:avoid}
-.pdf-charts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-@media print{.pdf-charts{grid-template-columns:1fr 1fr 1fr}}
+.pdf-ind{border:1px solid #d0e2f0;border-radius:6px;margin:0 0 16px;padding:10px 14px;page-break-after:always;break-after:page;page-break-inside:avoid;break-inside:avoid}
+.pdf-ind:last-child{page-break-after:auto;break-after:auto}
+.pdf-page-head{display:flex;justify-content:space-between;font-size:9px;color:#889;border-bottom:1px solid #d0e2f0;padding-bottom:4px;margin-bottom:8px}
+.pdf-title{margin:0 0 4px;color:#1a4a6e;font-size:18px}
+.pdf-value{font-size:13px;margin:2px 0 6px}
+.pdf-big{color:#c85a10;font-size:22px;font-weight:800}
+.pdf-desc{font-size:11px;color:#445;margin:4px 0 10px;line-height:1.45}
+.pdf-stats{font-size:11px;margin-bottom:2px}
+.pdf-note{font-size:9px;color:#889;margin-bottom:8px}
+.pdf-foot{display:flex;justify-content:space-between;font-size:9px;color:#9ab;border-top:1px solid #e1e5ea;margin-top:8px;padding-top:4px}
+.pdf-charts{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.pdf-charts .wide{grid-column:1/-1;max-width:64%;margin:0 auto;width:100%}
+@media print{.pdf-charts{grid-template-columns:1fr 1fr}}
 .pdf-charts h4{font-size:10.5px;color:#3a7abf;margin:4px 0}
 .pdf-na{font-size:10px;color:#999;font-style:italic}
 .msg.welcome{padding:40px 20px;text-align:center}
@@ -209,7 +219,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
   <button class="nav-tab" onclick="showTab('nouveautes',this)" id="nvtab">Nouveautés</button>
   <button class="reload-btn" id="reload-btn" onclick="reloadLive()">⚡ Recharger données</button>
   <div class="lastupd" id="lastupd">—</div>
-  <div class="branding">Contrôle de Gestion - Outil réalisé par IA mais révisé humainement.</div>
+  <div class="branding">Fait par le Contrôle de Gestion avec ❤️ et un peu d'IA</div>
 </div>
 
 <div id="modal-overlay" onclick="closeModal(event)">
@@ -283,29 +293,35 @@ var mapBuilt         = false;
 var geoCache         = null;
 var newCount         = 0;
 
+// Formatage français avec séparateur de milliers (espace insécable) : 25 484,6
+function nf(val, d) {
+  return val.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/[\u202f\u00a0]/g, '\u00a0');
+}
 function fmt(val, format, unit) {
   if (val === null || val === undefined) return '—';
+  if (typeof val !== 'number' || isNaN(val)) return String(val);
   switch(format) {
-    case 'pct1':   return val.toFixed(1) + ' %';
-    case 'dec1':   return val.toFixed(1) + (unit ? ' '+unit : '');
-    case 'dec2':   return val.toFixed(2) + (unit ? ' '+unit : '');
-    case 'int':    return Math.round(val).toLocaleString('fr-FR') + (unit ? ' '+unit : '');
-    case 'eur0':   return Math.round(val).toLocaleString('fr-FR') + ' €';
-    case 'keur':   return (val/1000).toFixed(1) + ' M€';
-    default:       return val.toLocaleString('fr-FR') + (unit ? ' '+unit : '');
+    case 'pct1':   return nf(val, 1) + ' %';
+    case 'dec1':   return nf(val, 1) + (unit ? ' '+unit : '');
+    case 'dec2':   return nf(val, 2) + (unit ? ' '+unit : '');
+    case 'int':    return nf(val, 0) + (unit ? ' '+unit : '');
+    case 'eur0':   return nf(val, 0) + ' €';
+    case 'keur':   return nf(val/1000, 1) + ' M€';
+    default:       return val.toLocaleString('fr-FR', { maximumFractionDigits: 2 }).replace(/[\u202f\u00a0]/g, '\u00a0') + (unit ? ' '+unit : '');
   }
 }
 
 function fmtShort(val, format) {
   if (val === null || val === undefined) return '—';
+  if (typeof val !== 'number' || isNaN(val)) return String(val);
   switch(format) {
-    case 'pct1':   return val.toFixed(1);
-    case 'dec1':   return val.toFixed(1);
-    case 'dec2':   return val.toFixed(2);
-    case 'int':    return Math.round(val).toLocaleString('fr-FR');
-    case 'eur0':   return Math.round(val).toLocaleString('fr-FR');
-    case 'keur':   return (val/1000).toFixed(1) + ' M€';
-    default:       return val.toFixed ? val.toFixed(2) : val;
+    case 'pct1':   return nf(val, 1);
+    case 'dec1':   return nf(val, 1);
+    case 'dec2':   return nf(val, 2);
+    case 'int':    return nf(val, 0);
+    case 'eur0':   return nf(val, 0);
+    case 'keur':   return nf(val/1000, 1) + ' M€';
+    default:       return nf(val, 2);
   }
 }
 
@@ -1318,7 +1334,7 @@ function buildNouveautes() {
 // ============================================================
 var exportTheme = 'all';
 var exportSel = {};
-var exportOpts = { synth: true, rank: true, evo: true, def: true };
+var exportOpts = { synth: true, rank: true, evo: true, def: true }; // synth = tableau de statistiques sur la fiche de chaque indicateur
 
 function exportInds() {
   return ALL_META.filter(function(m) { return exportTheme === 'all' || (m.themes && m.themes.indexOf(exportTheme) >= 0); });
@@ -1351,11 +1367,11 @@ function buildExport() {
     '<div style="margin-bottom:8px;font-size:12px"><a href="#" onclick="exportSelectAll(true);return false">Tout cocher</a> · <a href="#" onclick="exportSelectAll(false);return false">Tout décocher</a> — <b id="exp-count">' + Object.keys(exportSel).length + '</b> sélectionné(s)</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 16px;max-height:260px;overflow-y:auto">' + list + '</div></div>' +
     '<div class="exp-options no-print"><h4>2. Contenu du rapport</h4>' +
-    opt('synth', 'Tableau de synthèse (Aude, moyenne, médiane, quartiles, rangs — strate, Occitanie, France)') +
+    opt('synth', 'Statistiques comparatives de l\'indicateur (moyenne, médiane, quartiles, rang — strate, Occitanie, France)') +
     opt('rank', 'Graphique : classement de l\'Aude parmi les départements de sa strate') +
     opt('evo', 'Graphique : évolution des données de l\'Aude (avec moyennes Occitanie et France)') +
     opt('def', 'Définition de chaque indicateur') +
-    '<button class="gen-pdf-btn" style="margin-top:8px" onclick="generatePdf()">Générer le rapport</button></div>' +
+    '<button class="gen-pdf-btn" style="margin-top:8px" onclick="generatePdf()">Générer les fiches (1 page par indicateur)</button></div>' +
     '<div id="pdf-preview-wrap"><div id="pdf-preview-header"><span>Aperçu du rapport</span>' +
     '<span><button onclick="window.print()" style="background:#ED7D31;border:none;color:#fff;cursor:pointer;font-size:11px;padding:5px 10px;border-radius:4px;margin-right:8px">🖨️ Imprimer / Enregistrer en PDF</button>' +
     '<button onclick="document.getElementById(\'pdf-preview-wrap\').classList.remove(\'on\')" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px">✕</button></span></div>' +
@@ -1481,42 +1497,36 @@ async function generatePdf() {
   var geo = null;
   try { geo = await ensureGeo(); } catch (e) { /* pas de fond de carte disponible hors-ligne */ }
 
-  var html = '<div class="pdf-head"><h2 style="color:#1a4a6e;margin:0">Observatoire social — Département de l\'Aude</h2>' +
-    '<p style="color:#667;font-size:11px;margin:4px 0 10px">Rapport généré le ' + new Date().toLocaleDateString('fr-FR') + ' · Sources officielles : DREES, INSEE, CAF, CNSA, Open Data Aude · Rang 1 = valeur la plus haute</p></div>';
-
-  if (exportOpts.synth) {
-    html += '<h3 style="color:#3a7abf;margin:6px 0">Tableau de synthèse</h3><table class="pdf-sum"><thead><tr><th rowspan="2">Indicateur</th><th rowspan="2">Année</th><th rowspan="2">Aude</th>' +
-      '<th colspan="4">Strate</th><th colspan="4">Occitanie</th><th colspan="4">France Métro.</th></tr><tr>' +
-      ['Moy.', 'Méd.', 'Q1', 'Q3', 'Moy.', 'Méd.', 'Q1', 'Q3', 'Moy.', 'Méd.', 'Q1', 'Q3'].map(function(h) { return '<th>' + h + '</th>'; }).join('') +
-      '</tr></thead><tbody>';
-    inds.forEach(function(m) {
-      function grp(st) { st = st || {}; return ['mean', 'median', 'q1', 'q3'].map(function(k) { return '<td>' + n(st[k], m.fmt) + '</td>'; }).join(''); }
-      html += '<tr><td><b>' + m.label + '</b>' + (m.unit ? ' <span style="color:#889">(' + m.unit + ')</span>' : '') + '</td><td>' + (m.annee || '—') + '</td><td style="background:#fff3e8;font-weight:800">' + n(m.aude, m.fmt) + '</td>' +
-        grp(m.stats_strate) + grp(m.stats_occ) + grp(m.stats_fr) + '</tr>';
-    });
-    html += '</tbody></table>';
-    html += '<table class="pdf-sum" style="margin-top:8px"><thead><tr><th>Rang de l\'Aude (1 = valeur la plus haute)</th><th>Strate</th><th>Occitanie</th><th>France Métro.</th></tr></thead><tbody>' +
-      inds.map(function(m) { return '<tr><td>' + m.label + '</td><td>' + rk(m.rank_strate, m.total_strate) + '</td><td>' + rk(m.rank_occ, m.total_occ) + '</td><td>' + rk(m.rank_fr, m.total_fr) + '</td></tr>'; }).join('') + '</tbody></table>';
-  }
-
-  if (exportOpts.rank || exportOpts.evo || exportOpts.def) {
-    inds.forEach(function(m) {
-      var rkC = exportOpts.rank ? svgRankStrate(m) : null, evC = exportOpts.evo ? svgEvoAude(m) : null;
-      var mapC = exportOpts.rank ? svgMiniMap(m, geo) : null; // la carto accompagne le classement de la strate
-      html += '<div class="pdf-ind"><h3 style="margin:0;color:#1a4a6e">' + m.label + (m.unit ? ' <span style="font-weight:400;color:#889">(' + m.unit + ')</span>' : '') + '</h3>' +
-        '<div style="font-size:12px;margin:3px 0"><b style="color:#c85a10;font-size:15px">Aude : ' + fmt(m.aude, m.fmt, m.unit) + '</b>' + (m.annee ? ' <span style="color:#889">(' + m.annee + ')</span>' : '') +
-        ' · Rang — Strate ' + rk(m.rank_strate, m.total_strate) + ' · Occitanie ' + rk(m.rank_occ, m.total_occ) + ' · France Métro. ' + rk(m.rank_fr, m.total_fr) + '</div>' +
-        (exportOpts.def && m.desc ? '<p style="font-size:10.5px;color:#445;margin:2px 0 6px">' + m.desc + '</p>' : '');
-      if (exportOpts.rank || exportOpts.evo) {
-        html += '<div class="pdf-charts">';
-        if (exportOpts.rank) html += '<div><h4>Cartographie (France Métro.)' + (mapC ? '' : ' <span class="pdf-na" style="font-size:9px">— non disponible</span>') + '</h4>' + (mapC || '<p class="pdf-na">Comparatif départemental non disponible pour cet indicateur.</p>') + '</div>';
-        if (exportOpts.rank) html += '<div><h4>Classement de l\'Aude dans sa strate' + (rkC ? ' — ' + rkC.rank + 'ᵉ sur ' + rkC.total : '') + '</h4>' + (rkC ? rkC.svg : '<p class="pdf-na">Comparatif de la strate non disponible pour cet indicateur.</p>') + '</div>';
-        if (exportOpts.evo) html += '<div><h4>Évolution de l\'Aude (5 ans)</h4>' + (evC || '<p class="pdf-na">Série temporelle non disponible (un seul millésime publié).</p>') + '</div>';
-        html += '</div>';
-      }
-      html += '<div style="font-size:9px;color:#9ab;margin-top:2px">Source : ' + (m.source || '') + '</div></div>';
-    });
-  }
+  var today = new Date().toLocaleDateString('fr-FR');
+  var html = '';
+  inds.forEach(function(m) {
+    var rkC = exportOpts.rank ? svgRankStrate(m) : null, evC = exportOpts.evo ? svgEvoAude(m) : null;
+    var mapC = exportOpts.rank ? svgMiniMap(m, geo) : null;
+    function statRow(lbl, st, r, t) {
+      st = st || {};
+      return '<tr><td>' + lbl + '</td><td>' + n(st.mean, m.fmt) + '</td><td>' + n(st.median, m.fmt) + '</td><td>' + n(st.q1, m.fmt) + '</td><td>' + n(st.q3, m.fmt) + '</td><td><b>' + rk(r, t) + '</b></td></tr>';
+    }
+    html += '<div class="pdf-ind">' +
+      '<div class="pdf-page-head"><span>Observatoire social — Département de l\'Aude</span><span>' + today + '</span></div>' +
+      '<h3 class="pdf-title">' + m.label + (m.unit ? ' <span style="font-weight:400;color:#889;font-size:13px">(' + m.unit + ')</span>' : '') + '</h3>' +
+      '<div class="pdf-value"><span class="pdf-big">Aude : ' + fmt(m.aude, m.fmt, m.unit) + '</span>' + (m.annee ? ' <span style="color:#889">(' + m.annee + ')</span>' : '') + '</div>' +
+      (exportOpts.def && m.desc ? '<p class="pdf-desc">' + m.desc + '</p>' : '');
+    if (exportOpts.synth) {
+      html += '<table class="pdf-sum pdf-stats"><thead><tr><th>Échelle</th><th>Moyenne</th><th>Médiane</th><th>1er quartile</th><th>3e quartile</th><th>Rang de l\'Aude</th></tr></thead><tbody>' +
+        statRow('Strate (' + (m.total_strate || '?') + ' dép.)', m.stats_strate, m.rank_strate, m.total_strate) +
+        statRow('Occitanie (' + (m.total_occ || '?') + ' dép.)', m.stats_occ, m.rank_occ, m.total_occ) +
+        statRow('France métro. (' + (m.total_fr || '?') + ' dép.)', m.stats_fr, m.rank_fr, m.total_fr) +
+        '</tbody></table><div class="pdf-note">Rang 1 = valeur la plus haute.</div>';
+    }
+    if (exportOpts.rank || exportOpts.evo) {
+      html += '<div class="pdf-charts">';
+      if (exportOpts.rank) html += '<div><h4>Cartographie (France métro.)' + (mapC ? '' : ' <span class="pdf-na" style="font-size:9px">— non disponible</span>') + '</h4>' + (mapC || '<p class="pdf-na">Comparatif départemental non disponible pour cet indicateur.</p>') + '</div>';
+      if (exportOpts.rank) html += '<div><h4>Classement de l\'Aude dans sa strate' + (rkC ? ' — ' + rkC.rank + 'ᵉ sur ' + rkC.total : '') + '</h4>' + (rkC ? rkC.svg : '<p class="pdf-na">Comparatif de la strate non disponible pour cet indicateur.</p>') + '</div>';
+      if (exportOpts.evo) html += '<div class="wide"><h4>Évolution de l\'Aude</h4>' + (evC || '<p class="pdf-na">Série temporelle non disponible (un seul millésime publié).</p>') + '</div>';
+      html += '</div>';
+    }
+    html += '<div class="pdf-foot"><span>Source : ' + (m.source || '') + '</span><span>Fait par le Contrôle de Gestion avec ❤️ et un peu d\'IA</span></div></div>';
+  });
 
   document.getElementById('pdf-preview-body').innerHTML = html;
   var w = document.getElementById('pdf-preview-wrap'); w.classList.add('on');
@@ -1614,6 +1624,29 @@ async function loadCAF() {
       indfoy_ppa: "Nombre de foyers percevant la prime d'activité, complément de revenu pour les travailleurs aux ressources modestes.",
       indmtt_ppa: "Montant total de prime d'activité versé dans le mois."
     };
+    // Détection automatique : tout champ numérique de la ligne Aude non listé ci-dessus devient un indicateur
+    try {
+      var cafKnown = {}; CAF_FIELDS.forEach(function(f) { cafKnown[f.key] = 1; });
+      var cafSchema = {};
+      try {
+        var rsc = await fetch('https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy');
+        if (rsc.ok) { var jsc = await rsc.json(); (jsc.fields || (jsc.dataset && jsc.dataset.fields) || []).forEach(function(ff) { cafSchema[ff.name] = ff; }); }
+      } catch (eSc) { /* libellés déduits des noms de champs */ }
+      var cafSkip = /^(numdep|dtreffre|dep|code|lib|nom|reg|annee|mois|date|geo|insee)/;
+      var nbAutoCaf = 0;
+      Object.keys(rec).forEach(function(k) {
+        if (cafKnown[k] || cafSkip.test(k) || typeof rec[k] !== 'number') return;
+        var kn = k.toLowerCase(), money = /mtt|montant|eur/.test(kn);
+        var th = ['social'];
+        if (/aah|aeeh|ajpp|handi/.test(kn)) th = ['handicap']; else if (/ajpa|aidant|senior|vieil/.test(kn)) th = ['ages'];
+        if (money) th.push('financier');
+        CAF_FIELDS.push({ key: k, auto: true,
+          label: (cafSchema[k] && cafSchema[k].label) || k.replace(/^ind/, '').replace(/_/g, ' ').trim(),
+          fmt: money ? 'eur0' : (Number.isInteger(rec[k]) ? 'int' : 'dec1'), unit: money ? '€' : '', themes: th });
+        nbAutoCaf++;
+      });
+      if (nbAutoCaf) addLog('ℹ️', 'CAF : ' + nbAutoCaf + ' indicateur(s) supplémentaire(s) détecté(s) automatiquement.');
+    } catch (eAuto) { /* on garde la liste configurée */ }
     CAF_FIELDS.forEach(function(f) {
       var val = rec[f.key];
       if (val === null || val === undefined) return;
@@ -1634,7 +1667,7 @@ async function loadCAF() {
         has_ts: false,
         source: 'CAF — données mensuelles',
         annee: dateRef,
-        desc: (CAF_DEFS[f.key] || 'Donnée mensuelle CAF.') + ' Valeur du dernier mois publié (' + dateRef + ').',
+        desc: (CAF_DEFS[f.key] || (f.auto ? 'Indicateur détecté automatiquement (champ ' + f.key + ').' : 'Donnée mensuelle CAF.')) + ' Valeur du dernier mois publié (' + dateRef + ').',
         isNew: isNew && prevIds.length > 0
       };
 
@@ -1767,6 +1800,24 @@ var CNSA_DATASETS = { synthese: ['synthese_financement_branche_autonomie_pa_ph']
 var CNSA_FIELD_CACHE = {};
 var CNSA_RESOLVED_ID = {};
 
+var DEPT_NAME2CODE = null;
+// Code département (« 11 », « 011 », 11, « Aude », « AUDE », « 11 - Aude »…) → « 11 ». null si non reconnu.
+function deptCodeOf(v) {
+  if (v === null || v === undefined || typeof v === 'boolean') return null;
+  if (!DEPT_NAME2CODE) {
+    DEPT_NAME2CODE = {};
+    Object.keys(DREES_DEPTS).forEach(function(c) { DEPT_NAME2CODE[normFrCnsa(DREES_DEPTS[c]).replace(/[^a-z0-9]/g, '')] = c; });
+    var alias = { guadeloupe: '971', martinique: '972', guyane: '973', lareunion: '974', reunion: '974', mayotte: '976',
+      cotedor: '21', cotesdarmor: '22', seinesaintdenis: '93', seinestdenis: '93', valdoise: '95', valdemarne: '94',
+      hautsdeseine: '92', bouchesdurhone: '13', territoiredebelfort: '90' };
+    Object.keys(alias).forEach(function(k) { if (!DEPT_NAME2CODE[k]) DEPT_NAME2CODE[k] = alias[k]; });
+  }
+  var str = String(v).trim().toUpperCase();
+  var m = str.match(/^0*(2[AB]|\d{1,3})(?=\D|$)/);
+  if (m) { var c = m[1]; return c.length === 1 ? '0' + c : c; }
+  var nm = normFrCnsa(str).replace(/^departement (de la |de l'|du |des |de |d')?/, '').replace(/[^a-z0-9]/g, '');
+  return DEPT_NAME2CODE[nm] || null;
+}
 function normFrCnsa(s) { return (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
 
 async function getCnsaFields(dsKey) {
@@ -1808,177 +1859,166 @@ function findCnsaDim(fields, kind) {
   return cands2[0] ? cands2[0].name : null;
 }
 
+var CNSA_CATALOG = 'https://data-autonomie.cnsa.fr/api/explore/v2.1/catalog/datasets';
+var CNSA_MAX_ROWS = 1500; // au-delà : jeu « détaillé » (établissements, etc.), pas une table département × année
+
+// Charge UN jeu du catalogue. Un jeu est retenu s'il a une colonne département reconnaissable et
+// UNE ligne par département et par année ; chaque champ numérique devient alors un indicateur.
+async function cnsaLoadDataset(dsId, info, prevIds) {
+  var fields = info.fields;
+  if (!fields || !fields.length) {
+    var rs = await fetch(CNSA_BASE + dsId);
+    if (!rs.ok) return { n: 0, why: 'schéma HTTP ' + rs.status };
+    var raw = await rs.json();
+    fields = Array.isArray(raw.fields) ? raw.fields : (raw.dataset && Array.isArray(raw.dataset.fields) ? raw.dataset.fields : []);
+    if (info.count == null) { var mm = raw.metas && (raw.metas.default || raw.metas); info.count = mm ? mm.records_count : null; }
+  }
+  if (!fields.length) return { n: 0, why: 'pas de table interrogeable' };
+  if (info.count != null && info.count > CNSA_MAX_ROWS) return { n: 0, why: info.count + ' lignes : jeu détaillé' };
+  var yearField = findCnsaDim(fields, 'year');
+
+  // 1) lecture complète (sans filtre serveur : le format du département n'est pas garanti)
+  var allRows = [];
+  for (var pg = 0; pg < 15; pg++) {
+    var rp = await fetch(CNSA_BASE + dsId + '/records?limit=100&offset=' + (pg * 100));
+    if (!rp.ok) { if (pg === 0) return { n: 0, why: 'HTTP ' + rp.status }; break; }
+    var dp = await rp.json(), resp = dp.results || [];
+    allRows = allRows.concat(resp);
+    if (resp.length < 100) break;
+  }
+  if (!allRows.length) return { n: 0, why: 'jeu vide' };
+  if (allRows.length >= CNSA_MAX_ROWS) return { n: 0, why: 'jeu détaillé (trop de lignes)' };
+
+  // 2) champ département : d'après les VALEURS (codes ou noms)
+  var cand = fields.filter(function(f) {
+    var isText = allRows.some(function(rr) { return typeof rr[f.name] === 'string'; });
+    var exactCode = ['dep', 'departement', 'code_dep', 'code_departement', 'num_dep', 'coddep', 'dept', 'codegeo', 'code_geo'].indexOf(normFrCnsa(f.name)) >= 0;
+    return isText || exactCode;
+  });
+  var codeField = null, best = 0;
+  cand.forEach(function(f) {
+    var ok = 0;
+    allRows.forEach(function(rr) { if (deptCodeOf(rr[f.name]) !== null) ok++; });
+    var sc = ok / allRows.length;
+    if (sc >= 0.5 && sc > best) { best = sc; codeField = f.name; }
+  });
+  if (!codeField) return { n: 0, why: 'pas de colonne département' };
+
+  var rows11 = allRows.filter(function(rr) { return deptCodeOf(rr[codeField]) === '11'; });
+  if (yearField) rows11.sort(function(a, b) { return String(b[yearField]).localeCompare(String(a[yearField])); });
+  if (!rows11.length) return { n: 0, why: 'aucune ligne pour l\'Aude' };
+  var nbYears = yearField ? Array.from(new Set(rows11.map(function(rr) { return String(rr[yearField]); }))).length : 1;
+  if (rows11.length !== nbYears) return { n: 0, why: 'plusieurs lignes par département/année : jeu détaillé' };
+
+  // 3) comparatif national, année par année
+  var natByYear = {};
+  allRows.forEach(function(rr) {
+    var y = yearField ? String(rr[yearField]) : '_', dc = deptCodeOf(rr[codeField]);
+    if (dc === null) return;
+    Object.keys(rr).forEach(function(k) {
+      if (typeof rr[k] !== 'number') return;
+      if (!natByYear[y]) natByYear[y] = {};
+      if (!natByYear[y][k]) natByYear[y][k] = {};
+      natByYear[y][k][dc] = rr[k];
+    });
+  });
+
+  // 4) champs numériques = indicateurs
+  var skip = {}; skip[codeField] = 1; if (yearField) skip[yearField] = 1;
+  var excludePattern = /code|siren|insee\b|^id$|_id$|region|libelle|^nom|label|latitude|longitude|geo_/;
+  function latestNum(f) {
+    for (var i = 0; i < rows11.length; i++) {
+      var v = rows11[i][f.name];
+      if (typeof v === 'number' && !isNaN(v)) return { v: v, y: yearField ? rows11[i][yearField] : null };
+    }
+    return null;
+  }
+  var n = 0;
+  fields.forEach(function(f) {
+    if (skip[f.name] || excludePattern.test(normFrCnsa(f.name))) return;
+    var ln = latestNum(f); if (!ln) return;
+    var nameNorm = normFrCnsa(f.name + ' ' + (f.label || ''));
+    var fmtName = /taux|pct|couverture|part_|pourcentage/.test(nameNorm) ? 'pct1' : (/depense|montant|cout|euro|eur\b/.test(nameNorm) ? 'eur0' : 'dec1');
+    var id = 'cnsa_' + dsId + '_' + f.name;
+    var isNew = prevIds.indexOf(id) < 0;
+    if (isNew && prevIds.length > 0) newCount++;
+    var th = ['financier'], tx = normFrCnsa(dsId + ' ' + (f.label || f.name));
+    if (/(^|[^a-z])pa([^a-z]|$)|personnes.?agees|apa|ehpad|senior/.test(tx)) th.push('ages');
+    if (/(^|[^a-z])ph([^a-z]|$)|handicap|pch|mdph|aah/.test(tx)) th.push('handicap');
+    if (th.length === 1) th = ['financier', 'ages', 'handicap'];
+    var sc = 1;
+    if (fmtName === 'pct1') { // taux stockés en proportion (0,52) → pourcentage (52 %)
+      var mxa = 0; allRows.forEach(function(rr) { var vv = rr[f.name]; if (typeof vv === 'number') mxa = Math.max(mxa, Math.abs(vv)); });
+      if (mxa > 0 && mxa <= 1.0001) sc = 100;
+    }
+    var entry = {
+      id: id, label: f.label || f.name,
+      unit: fmtName === 'pct1' ? '%' : (fmtName === 'eur0' ? '€' : ''), fmt: fmtName, themes: th,
+      aude: ln.v * sc, occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
+      total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false,
+      source: 'CNSA — Data Autonomie', annee: ln.y,
+      desc: 'Indicateur détecté automatiquement dans le jeu CNSA « ' + dsId + ' » (champ ' + f.name + ').',
+      isNew: isNew && prevIds.length > 0
+    };
+    var snapMap = (natByYear[yearField ? String(ln.y) : '_'] || {})[f.name];
+    if (snapMap) { var snapSc = {}; Object.keys(snapMap).forEach(function(k) { snapSc[k] = snapMap[k] * sc; }); snapMap = snapSc; }
+    if (snapMap && Object.keys(snapMap).length > 1) {
+      DREES_SNAP[id] = snapMap;
+      var frRes = statsAndRankFor(snapMap, null), strRes = statsAndRankFor(snapMap, STRATE), occRes = statsAndRankFor(snapMap, OCC);
+      entry.stats_fr = frRes.stats; entry.rank_fr = frRes.rank; entry.total_fr = frRes.total; entry.fra = frRes.stats.mean;
+      entry.stats_strate = strRes.stats; entry.rank_strate = strRes.rank; entry.total_strate = strRes.total;
+      entry.stats_occ = occRes.stats; entry.rank_occ = occRes.rank; entry.total_occ = occRes.total; entry.occ = occRes.stats.mean;
+    } else { DREES_SNAP[id] = { '11': ln.v * sc }; }
+    // évolution : Aude (une valeur par année) + moyennes France / Occitanie si le comparatif existe
+    if (yearField) {
+      var sA = {}, sF = {}, sO = {};
+      rows11.forEach(function(rr) { var v = rr[f.name]; if (typeof v === 'number' && sA[String(rr[yearField])] === undefined) sA[String(rr[yearField])] = v * sc; });
+      Object.keys(natByYear).forEach(function(y) {
+        var mp0 = natByYear[y][f.name]; if (!mp0) return;
+        var mp = {}; Object.keys(mp0).forEach(function(k) { mp[k] = mp0[k] * sc; });
+        var all = statsAndRankFor(mp, null), oc = statsAndRankFor(mp, OCC);
+        if (all.total >= 20) sF[y] = all.stats.mean;
+        if (oc.total) sO[y] = oc.stats.mean;
+      });
+      if (setTs(id, '11', sA)) { entry.has_ts = true; setTs(id, 'FRA', sF); setTs(id, 'OCC', sO); }
+    }
+    CNSA_META.push(entry);
+    n++;
+  });
+  return { n: n, why: n ? '' : 'aucun champ numérique exploitable' };
+}
+
 async function loadCNSA() {
   try {
-    addLog('⏳', 'Chargement CNSA (Data Autonomie)...');
-    var fields = await getCnsaFields('synthese');
-    if (!fields.length) { addLog('⚠️', 'CNSA : jeu de données indisponible ou schéma illisible.'); return; }
-    var dsId = CNSA_RESOLVED_ID.synthese;
-    var yearField = findCnsaDim(fields, 'year');
-
-    // 1) Lecture complète du jeu (≈ 100 départements × quelques années) : on ne filtre PAS côté
-    //    serveur, car le format du champ département (« 11 », « 011 », « Aude »…) n'est pas garanti.
-    var allRows = [];
-    for (var pg = 0; pg < 100; pg++) {
-      var rp = await fetch(CNSA_BASE + dsId + '/records?limit=100&offset=' + (pg * 100));
-      if (!rp.ok) {
-        if (pg === 0) throw new Error('CNSA HTTP ' + rp.status);
-        addLog('⚠️', 'CNSA : lecture interrompue à la page ' + (pg + 1) + ' (HTTP ' + rp.status + ').');
-        break;
-      }
-      var dp = await rp.json();
-      var resp = dp.results || [];
-      allRows = allRows.concat(resp);
-      if (resp.length < 100) break;
-    }
-    if (!allRows.length) { addLog('⚠️', 'CNSA : le jeu ' + dsId + ' ne renvoie aucune ligne.'); return; }
-
-    // 2) Détection du champ « code département » d'après les VALEURS réelles (et non le seul nom).
-    var cnsaNameToCode = {};
-    Object.keys(DREES_DEPTS).forEach(function(c) { cnsaNameToCode[normFrCnsa(DREES_DEPTS[c]).replace(/[^a-z0-9]/g, '')] = c; });
-    // Alias fréquents (abréviations, DROM, orthographes différentes) rencontrés dans les jeux CNSA
-    var cnsaAlias = { guadeloupe: '971', martinique: '972', guyane: '973', lareunion: '974', reunion: '974', mayotte: '976',
-      cotedor: '21', cotesdarmor: '22', cotesdarmor2: '22', territoiredebelfort: '90', sainthdenis: '93',
-      seinesaintdenis: '93', seinestdenis: '93', valdoise: '95', valdemarne: '94', hautsdeseine: '92', bouchesdurhone: '13' };
-    Object.keys(cnsaAlias).forEach(function(k) { if (!cnsaNameToCode[k]) cnsaNameToCode[k] = cnsaAlias[k]; });
-    function cnsaDeptCode(v) {
-      if (v === null || v === undefined || typeof v === 'boolean') return null;
-      var str = String(v).trim().toUpperCase();
-      var m = str.match(/^0*(\d{1,3}|2[AB])(?=\D|$)/);
-      if (m) { var c = m[1]; return c.length === 1 ? '0' + c : c; }
-      // Nom de département (« Aude », « Département de l'Aude », « 11 - Aude » déjà traité ci-dessus)
-      var nm = normFrCnsa(str).replace(/^departement (de la |de l'|du |des |de |d')?/, '').replace(/[^a-z0-9]/g, '');
-      return cnsaNameToCode[nm] || null;
-    }
-    var deptLike = fields.filter(function(f) {
-      var isText = allRows.some(function(rr) { return typeof rr[f.name] === 'string'; });
-      // Champs numériques : seulement s'ils portent un nom exact de code département
-      // (évite de prendre « depenses_… » pour un département).
-      var exactCode = ['dep', 'departement', 'code_dep', 'code_departement', 'num_dep', 'coddep', 'dept', 'codegeo', 'code_geo'].indexOf(normFrCnsa(f.name)) >= 0;
-      return isText || exactCode;
-    });
-    var codeField = null, bestScore = 0;
-    deptLike.forEach(function(f) {
-      var ok = 0;
-      allRows.forEach(function(rr) { if (cnsaDeptCode(rr[f.name]) !== null) ok++; });
-      var score = ok / allRows.length;
-      if (score >= 0.5 && score > bestScore) { bestScore = score; codeField = f.name; }
-    });
-    var nameField = null;
-    var depField = codeField;
-    if (codeField) {
-      var unk = {};
-      allRows.forEach(function(rr) { if (cnsaDeptCode(rr[codeField]) === null && rr[codeField] != null) unk[String(rr[codeField])] = 1; });
-      var unkList = Object.keys(unk);
-      if (unkList.length) addLog('ℹ️', 'CNSA : ' + unkList.length + ' libellé(s) de territoire non rattaché(s) à un département (ignorés) : ' + unkList.slice(0, 8).join(', '));
-    }
-
-    // 3) Filtrage côté client : lignes de l'Aude, triées par année décroissante.
-    function isAude(rr) {
-      return cnsaDeptCode(rr[codeField]) === '11';
-    }
-    var rows11 = depField ? allRows.filter(isAude) : [];
-    if (yearField) rows11.sort(function(a, b) { return String(b[yearField]).localeCompare(String(a[yearField])); });
-    if (!rows11.length) {
-      var sample = deptLike.slice(0, 4).map(function(f) { return f.name + '=' + JSON.stringify(allRows[0][f.name]); }).join(', ');
-      addLog('⚠️', 'CNSA : aucune ligne pour l\'Aude sur ' + dsId + ' (' + allRows.length + ' lignes lues, champ code=' + (codeField || 'introuvable') + ', valeurs=' + JSON.stringify(allRows.slice(0, 3).map(function(rr) { return codeField ? rr[codeField] : null; })) + '). Exemple : ' + sample);
-      return;
-    }
-    addLog('ℹ️', 'CNSA : ' + allRows.length + ' lignes lues, ' + rows11.length + ' pour l\'Aude (champ ' + depField + ').');
-    var rec = rows11[0];
-    var period = yearField ? rec[yearField] : null;
-
-    // 4) Comparatif national à la même période (uniquement si on dispose d'un champ code).
-    var natMap = {};
-    if (codeField) {
-      allRows.forEach(function(rr) {
-        if (yearField && String(rr[yearField]) !== String(period)) return;
-        var dc = cnsaDeptCode(rr[codeField]); if (dc === null) return;
-        Object.keys(rr).forEach(function(k) {
-          if (typeof rr[k] !== 'number') return;
-          if (!natMap[k]) natMap[k] = {};
-          natMap[k][dc] = rr[k];
-        });
-      });
-      addLog('ℹ️', 'CNSA : comparatif national sur ' + Object.keys(natMap).length + ' champ(s) numérique(s) (période ' + period + ').');
-    } else {
-      addLog('⚠️', 'CNSA : pas de champ code département exploitable, valeur Aude seule.');
-    }
-
-    var skip = {}; skip[depField] = 1; if (codeField) skip[codeField] = 1; if (nameField) skip[nameField] = 1; if (yearField) skip[yearField] = 1;
-    // On garde les champs numériques hors clés techniques (département/année/codes/libellés).
-    var excludePattern = /code|siren|insee\b|^id$|_id$|region|libelle|^nom|label/;
-    var numericFields = fields.filter(function(f) {
-      if (skip[f.name]) return false;
-      if (excludePattern.test(normFrCnsa(f.name))) return false;
-      return typeof rec[f.name] === 'number';
-    });
-    if (!numericFields.length) { addLog('⚠️', 'CNSA : aucun champ numérique exploitable dans ' + dsId + '.'); return; }
-
+    addLog('⏳', 'Chargement CNSA (Data Autonomie) — détection automatique des jeux de données...');
     var prevIds = CNSA_META.map(function(m) { return m.id; });
     CNSA_META = [];
-    numericFields.forEach(function(f) {
-      var val = rec[f.name];
-      if (val === null || val === undefined) return;
-      var nameNorm = normFrCnsa(f.name + ' ' + (f.label || ''));
-      var fmtName = /taux|pct|couverture|part_/.test(nameNorm) ? 'pct1' : (/depense|montant|cout|euro|eur\b/.test(nameNorm) ? 'eur0' : 'dec1');
-      var isNew = prevIds.indexOf('cnsa_' + f.name) < 0;
-      if (isNew && prevIds.length > 0) newCount++;
-
-      var entry = {
-        id: 'cnsa_' + f.name,
-        label: f.label || f.name,
-        unit: fmtName === 'pct1' ? '%' : (fmtName === 'eur0' ? '€' : ''),
-        fmt: fmtName,
-        themes: ['financier', 'ages', 'handicap'],
-        aude: val,
-        occ: null, fra: null,
-        rank_fr: null, rank_strate: null, rank_occ: null,
-        total_fr: 96, total_strate: 11, total_occ: 13,
-        stats_fr: {}, stats_strate: {}, stats_occ: {},
-        has_ts: false,
-        source: 'CNSA — Data Autonomie',
-        annee: period,
-        desc: 'Indicateur issu du jeu de données CNSA « ' + dsId + '» (branche Autonomie, dépenses et couverture PA/PH par département). Champ source : ' + f.name + '.',
-        isNew: isNew && prevIds.length > 0
-      };
-
-      var snapMap = natMap[f.name];
-      if (snapMap && Object.keys(snapMap).length > 1) {
-        DREES_SNAP['cnsa_' + f.name] = snapMap;
-        var frRes = statsAndRankFor(snapMap, null);
-        var strRes = statsAndRankFor(snapMap, STRATE);
-        var occRes = statsAndRankFor(snapMap, OCC);
-        entry.stats_fr = frRes.stats; entry.rank_fr = frRes.rank; entry.total_fr = frRes.total; entry.fra = frRes.stats.mean;
-        entry.stats_strate = strRes.stats; entry.rank_strate = strRes.rank; entry.total_strate = strRes.total;
-        entry.stats_occ = occRes.stats; entry.rank_occ = occRes.rank; entry.total_occ = occRes.total; entry.occ = occRes.stats.mean;
-      } else {
-        DREES_SNAP['cnsa_' + f.name] = { '11': val };
-      }
-      CNSA_META.push(entry);
-    });
-
-    // Évolution : une valeur par année pour l'Aude, à partir des lignes déjà récupérées.
+    // 1) catalogue complet des jeux de la plateforme (tout nouveau jeu est pris en compte)
+    var ids = CNSA_DATASETS.synthese.slice(), info = {};
     try {
-      var byYear = {};
-      if (yearField) {
-        rows11.forEach(function(rr) {
-          var y = String(rr[yearField]);
-          if (!byYear[y]) byYear[y] = rr; // lignes triées par année décroissante : 1ère rencontrée = valeur retenue
+      for (var off = 0; off < 500; off += 100) {
+        var rc = await fetch(CNSA_CATALOG + '?limit=100&offset=' + off);
+        if (!rc.ok) break;
+        var dc = await rc.json(), res = dc.results || dc.datasets || [];
+        res.forEach(function(x) {
+          var did = x.dataset_id || (x.dataset && x.dataset.dataset_id); if (!did) return;
+          var mt = x.metas && (x.metas.default || x.metas);
+          info[did] = { count: mt ? mt.records_count : null, fields: (x.fields && x.fields.length) ? x.fields : null };
+          if (ids.indexOf(did) < 0) ids.push(did);
         });
+        if (res.length < 100) break;
       }
-      var nTs = 0;
-      numericFields.forEach(function(f) {
-        var series = {};
-        Object.keys(byYear).forEach(function(y) { var v = byYear[y][f.name]; if (typeof v === 'number') series[y] = v; });
-        if (setTs('cnsa_' + f.name, '11', series)) nTs++;
-      });
-      addLog(nTs ? 'ℹ️' : '⚠️', 'CNSA : évolution annuelle chargée pour ' + nTs + ' indicateur(s).');
-    } catch (eTs) {
-      addLog('⚠️', 'CNSA : séries d\'évolution indisponibles (' + eTs.message + ').');
-    }
-
-    addLog('✅', 'CNSA chargée : ' + CNSA_META.length + ' indicateur(s)', true);
+    } catch (eCat) { addLog('⚠️', 'CNSA : catalogue illisible (' + eCat.message + '), jeu principal seul.'); }
+    // 2) chaque jeu est analysé ; ceux qui ne sont pas des tables département × année sont ignorés
+    var skipped = [], okSets = 0;
+    await runPool(ids.map(function(dsId) { return async function() {
+      try {
+        var r = await cnsaLoadDataset(dsId, info[dsId] || (info[dsId] = {}), prevIds);
+        if (r.n > 0) okSets++; else skipped.push(dsId + ' (' + r.why + ')');
+      } catch (e) { skipped.push(dsId + ' (erreur : ' + e.message + ')'); }
+    }; }), 3);
+    if (skipped.length) addLog('ℹ️', 'CNSA : ' + skipped.length + ' jeu(x) ignoré(s) — ' + skipped.slice(0, 15).join(' ; ') + (skipped.length > 15 ? ' …' : ''));
+    addLog(CNSA_META.length ? '✅' : '⚠️', 'CNSA : ' + CNSA_META.length + ' indicateur(s) chargé(s) depuis ' + okSets + ' jeu(x) de données (' + ids.length + ' dans le catalogue).');
   } catch (e) {
     addLog('❌', 'CNSA erreur : ' + e.message);
   }
@@ -2026,14 +2066,15 @@ async function loadINSEE() {
     return pool;
   }
   // Même requête pour tous les départements (comparatif) : GEO=DEP désigne le niveau « département ».
-  async function allDeps(ds, sampleObs, keepDims) {
+  async function allDeps(ds, sampleObs, keepDims, extra) {
+    extra = extra || '';
     var filt = '';
     Object.keys((sampleObs[0] || {}).dimensions || {}).forEach(function(k) {
       if (k === 'GEO' || k === 'TIME_PERIOD' || keepDims.indexOf(k) >= 0) return;
       var vals = Array.from(new Set(sampleObs.map(function(o) { return dim(o, k); })));
       if (vals.indexOf('_T') >= 0) filt += '&' + k + '=_T';
     });
-    var tries = filt ? [filt, ''] : [''];
+    var tries = filt ? [filt + extra, extra] : [extra];
     var lastErr = null;
     for (var i = 0; i < tries.length; i++) {
       try {
@@ -2060,9 +2101,9 @@ async function loadINSEE() {
       e.stats_fr = fr.stats; e.rank_fr = fr.rank; e.total_fr = fr.total; e.fra = fr.stats.mean;
       e.stats_strate = st.stats; e.rank_strate = st.rank; e.total_strate = st.total;
       e.stats_occ = oc.stats; e.rank_occ = oc.rank; e.total_occ = oc.total; e.occ = oc.stats.mean;
-      txt = ' — comparatif sur ' + fr.total + ' départements (moy. ' + fr.stats.mean.toFixed(2) + ')';
+      txt = ' — comparatif sur ' + fr.total + ' départements (moy. ' + fmtShort(fr.stats.mean, fmtName) + ')';
     } else { DREES_SNAP[id] = { '11': aude }; }
-    addLog('✅', 'INSEE : ' + label + ' = ' + (Math.round(aude * 100) / 100) + ' ' + unit + ' (' + period + ')' + txt, !existing);
+    addLog('ℹ️', 'Détail — ' + label + ' = ' + fmtShort(aude, fmtName) + (unit ? ' ' + unit : '') + ' (' + period + ')' + txt, !existing);
   }
 
   // ---------- 1) Population par tranche d'âge (recensement) ----------
@@ -2072,17 +2113,31 @@ async function loadINSEE() {
     var period = latestPeriod(obsA);
     var dimsInfo = Object.keys(obsA[0].dimensions || {}).map(function(k) { return k + '=' + Array.from(new Set(obsA.map(function(o) { return dim(o, k); }))).slice(0, 8).join('/'); });
     addLog('ℹ️', 'INSEE (' + ds1 + ') : ' + obsA.length + ' observations pour l\'Aude, dimensions → ' + dimsInfo.join(' ; '));
-    var all = await allDeps(ds1, obsA, ['AGE']);
-    var src = all || obsA;
-    var poolAll = reduceTotals(src, ['AGE']);
+    // La série de l'Aude vient de la requête Aude (complète). Le comparatif national est demandé
+    // période par période (TIME_PERIOD) : une requête « tous départements » unique est tronquée
+    // à 10 000 observations et ne renvoyait que quelques millésimes (2012, 2017, 2023).
     var byP = {};
-    poolAll.forEach(function(o) {
-      var pe = String(dim(o, 'TIME_PERIOD')), c = depCode(o), v = val(o);
-      if (!c || v === null) return;
-      if (!byP[pe]) byP[pe] = {};
-      if (!byP[pe][c]) byP[pe][c] = {};
-      byP[pe][c][dim(o, 'AGE')] = v;
-    });
+    function addObs(list, onlyP) {
+      reduceTotals(list, ['AGE']).forEach(function(o) {
+        var pe = String(dim(o, 'TIME_PERIOD')), c = depCode(o), v = val(o);
+        if (!c || v === null) return;
+        if (onlyP && pe !== onlyP) return;
+        if (!byP[pe]) byP[pe] = {};
+        if (!byP[pe][c]) byP[pe][c] = {};
+        byP[pe][c][dim(o, 'AGE')] = v;
+      });
+    }
+    addObs(obsA);
+    var periodsA = Array.from(new Set(obsA.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
+    var wantP = periodsA.slice(-6); // dernier millésime + 5 précédents
+    var nbNatOk = 0;
+    for (var wi = 0; wi < wantP.length; wi++) {
+      try {
+        var oP = await allDeps(ds1, obsA, ['AGE'], '&TIME_PERIOD=' + wantP[wi]);
+        if (oP) { addObs(oP, wantP[wi]); nbNatOk++; }
+      } catch (eP) { /* période ignorée pour le comparatif */ }
+    }
+    addLog('ℹ️', 'INSEE (' + ds1 + ') : ' + periodsA.length + ' millésime(s) pour l\'Aude (' + periodsA.join(', ') + ') ; comparatif départemental obtenu pour ' + nbNatOk + '/' + wantP.length + ' période(s).');
     var defs = [
       ['insee_pop',    'Population totale',            'hab.', 'int',  function(d) { return d._T; },                                      'Population du département (recensement, INSEE).', ['demographie']],
       ['insee_p65',    'Part des 65 ans et plus',      '%',    'pct1', function(d) { return d._T && d.Y_GE65 != null ? d.Y_GE65 / d._T * 100 : null; }, 'Part des 65 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']],
@@ -2092,6 +2147,23 @@ async function loadINSEE() {
       ['insee_a2064',  'Part des 20-64 ans',           '%',    'pct1', function(d) { return d._T && d.Y20T64 != null ? d.Y20T64 / d._T * 100 : null; }, 'Part des 20-64 ans dans la population (recensement INSEE).', ['demographie']],
       ['insee_ivieil', 'Indice de vieillissement',     '',     'dec1', function(d) { return d.Y_GE65 != null && d.Y_LT20 ? d.Y_GE65 / d.Y_LT20 * 100 : null; }, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']]
     ];
+    // Tranches d'âge supplémentaires présentes dans les données : part dans la population totale
+    var knownAge = { _T: 1, Y_GE65: 1, Y_GE80: 1, Y_LT20: 1, Y_LT15: 1, Y20T64: 1 }, ageSeen = {};
+    Object.keys(byP).forEach(function(pe) { Object.keys(byP[pe]).forEach(function(c) { Object.keys(byP[pe][c]).forEach(function(a) { ageSeen[a] = 1; }); }); });
+    function ageLabel(code) {
+      var mm;
+      if ((mm = /^Y_LT(\d+)$/.exec(code))) return 'moins de ' + mm[1] + ' ans';
+      if ((mm = /^Y_GE(\d+)$/.exec(code))) return mm[1] + ' ans et plus';
+      if ((mm = /^Y(\d+)T(\d+)$/.exec(code))) return 'de ' + mm[1] + ' à ' + mm[2] + ' ans';
+      return 'de la tranche ' + code;
+    }
+    Object.keys(ageSeen).forEach(function(code) {
+      if (knownAge[code]) return;
+      var al = ageLabel(code);
+      defs.push(['insee_age_' + code.toLowerCase(), 'Part des ' + al, '%', 'pct1',
+        function(d) { return d._T && d[code] != null ? d[code] / d._T * 100 : null; },
+        'Part de la population ' + al + ' (recensement INSEE, tranche ' + code + '), détectée automatiquement.', ['demographie']]);
+    });
     function meanOf(arr) { return arr.reduce(function(a, b) { return a + b; }, 0) / arr.length; }
     defs.forEach(function(df) {
       var snap = {}, sAude = {}, sFra = {}, sOcc = {};
@@ -2132,6 +2204,19 @@ async function loadINSEE() {
       ['insee_pauv', 'PR_MD60', 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) — Filosofi, INSEE.', ['demographie', 'social']],
       ['insee_nvmed', 'MED_SL', 'Niveau de vie médian', '€', 'eur0', 'Niveau de vie médian annuel par unité de consommation — Filosofi, INSEE.', ['demographie', 'social', 'financier']]
     ];
+    // Autres mesures Filosofi présentes dans les données : chacune devient un indicateur
+    var knownF = {}; fdefs.forEach(function(fd) { knownF[fd[1]] = 1; });
+    var measSeen = {};
+    poolF.forEach(function(o) { var c = dim(o, measDim); if (c) measSeen[c] = 1; });
+    Object.keys(measSeen).forEach(function(mc) {
+      if (knownF[mc]) return;
+      var vs = poolF.filter(function(o) { return dim(o, measDim) === mc; }).map(val).filter(function(v) { return v !== null; });
+      if (!vs.length) return;
+      var mx = Math.max.apply(null, vs.map(Math.abs));
+      var isPct = mc.charAt(0) === 'P' && mx <= 100, isEur = !isPct && mx >= 1000;
+      fdefs.push(['insee_f_' + mc.toLowerCase(), mc, 'Filosofi — mesure ' + mc, isPct ? '%' : (isEur ? '€' : ''), isPct ? 'pct1' : (isEur ? 'eur0' : 'dec2'),
+        'Mesure Filosofi « ' + mc + ' » (INSEE), détectée automatiquement.', ['demographie', 'social']]);
+    });
     fdefs.forEach(function(fd) {
       var snap = {};
       poolF.forEach(function(o) { if (dim(o, measDim) !== fd[1]) return; var c = depCode(o), v = val(o); if (c && v !== null) snap[c] = v; });
@@ -2141,6 +2226,8 @@ async function loadINSEE() {
   } catch (e) {
     addLog('⚠️', 'INSEE (Filosofi) : ' + e.message + '.');
   }
+  var nbIns = INSEE_META.length, nbCmp = INSEE_META.filter(function(m) { return m.stats_fr && m.stats_fr.n > 0; }).length;
+  addLog(nbIns ? '✅' : '⚠️', 'INSEE : ' + nbIns + ' indicateur(s) chargé(s) (dont ' + nbCmp + ' avec comparatif départemental).', nbIns > 0);
 }
 
 // ============================================================
@@ -2316,6 +2403,7 @@ async function loadDREES() {
   addLog('⏳', 'DREES : détection des champs de l\'API sur data.drees...');
   var dsUsed = {};
   DREES_RULES.forEach(function(r) { dsUsed[r.ds] = true; });
+  Object.keys(DREES_DATASETS).forEach(function(k) { dsUsed[k] = true; }); // tous les jeux : détection automatique des libellés
 
   var rowsByDs = {}, labelFieldByDs = {}, yearFieldByDs = {}, deptFieldByDs = {};
   for (var dsKey in dsUsed) {
@@ -2326,7 +2414,12 @@ async function loadDREES() {
       var yearField = findDreesDim(fields, 'annee');
       var labelField = findDreesLabelField(fields);
       if (!deptField || !labelField) { addLog('⚠️', 'DREES (' + dsKey + ') : champ département ou libellé introuvable.'); continue; }
-      var rows = await fetchDreesPages(dsKey, deptField + '="11"', 8);
+      // Le format du département peut varier (« 11 », « 011 », 11, « Aude »…) : on essaie plusieurs écritures.
+      var rows = [], clauses = [deptField + '="11"', deptField + '="011"', deptField + '=11', deptField + '="Aude"', deptField + '="AUDE"'];
+      for (var ci = 0; ci < clauses.length && !rows.length; ci++) {
+        try { rows = await fetchDreesPages(dsKey, clauses[ci], 20); } catch (eCl) { rows = []; }
+        if (rows.length && ci > 0) addLog('ℹ️', 'DREES (' + dsKey + ') : filtre département accepté sous la forme « ' + clauses[ci] + ' ».');
+      }
       if (!rows.length) { addLog('⚠️', 'DREES (' + dsKey + ') : 0 ligne pour l\'Aude (champ « ' + deptField + ' »).'); continue; }
       rowsByDs[dsKey] = rows; labelFieldByDs[dsKey] = labelField; yearFieldByDs[dsKey] = yearField; deptFieldByDs[dsKey] = deptField;
       var yrs = yearField ? Array.from(new Set(rows.map(function(x){ return x[yearField]; }))).sort().join(', ') : '?';
@@ -2348,7 +2441,7 @@ async function loadDREES() {
       rows.forEach(function(rr) {
         var dc = rr[deptField], v = rr.value;
         if (dc == null || v === null || v === undefined || v === '') return;
-        snapMap[String(dc)] = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (scale || 1);
+        snapMap[deptCodeOf(dc) || String(dc)] = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (scale || 1);
       });
       return snapMap;
     } catch (e) { return null; }
@@ -2422,6 +2515,81 @@ async function loadDREES() {
     updated++;
   }
 
+  // ---------- Détection automatique : tous les autres libellés présents pour l'Aude ----------
+  var autoAdded = 0;
+  try {
+    var ruleKeys = {};
+    DREES_RULES.forEach(function(r) { ruleKeys[fuseFr(r.exact)] = 1; });
+    var autoJobs = [], autoSeen = {}; // dédoublonnage par libellé, tous jeux confondus
+    Object.keys(rowsByDs).forEach(function(dsKey2) {
+      var groups = {}, lf = labelFieldByDs[dsKey2];
+      rowsByDs[dsKey2].forEach(function(rr) {
+        var lab = rr[lf]; if (!lab) return;
+        var k = fuseFr(lab);
+        if (ruleKeys[k] || autoSeen[k]) return;
+        (groups[k] = groups[k] || { label: lab, rows: [] }).rows.push(rr);
+      });
+      Object.keys(groups).forEach(function(k) { autoSeen[k] = 1; autoJobs.push({ ds: dsKey2, lf: lf, yf: yearFieldByDs[dsKey2], df: deptFieldByDs[dsKey2], g: groups[k] }); });
+    });
+    var nbLabels = autoJobs.length;
+    autoJobs = autoJobs.slice(0, 150);
+    function hashStr(t) { var x = 0; for (var i = 0; i < t.length; i++) x = (x * 31 + t.charCodeAt(i)) | 0; return (x >>> 0).toString(36); }
+    function dreesThemes(label, dsKey2) {
+      var t = normFr(label), th = [];
+      if (/rsa|insertion|revenu|pauvret|minima|chomage|emploi/.test(t)) th.push('social');
+      if (/enfan|ase\b|jeunesse|mineur|placement|aemo|aed\b|adoption|protection de l/.test(t)) th.push('ase');
+      if (/agee|apa\b|dependance|senior|vieill/.test(t)) th.push('ages');
+      if (/handic|pch\b|aah\b|mdph/.test(t)) th.push('handicap');
+      if (/depense|cout|financ|budget|recette|montant|epargne|dette|fiscal|charge/.test(t) || dsKey2 === 'financiers' || dsKey2 === 'depenses') th.push('financier');
+      if (!th.length) th.push(dsKey2 === 'enfance' ? 'ase' : 'social');
+      return th;
+    }
+    await runPool(autoJobs.map(function(j) { return async function() {
+      var num = function(v) { return typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v; };
+      var rowsG = j.g.rows.filter(function(rr) { var v = num(rr.value); return typeof v === 'number' && !isNaN(v); });
+      if (!rowsG.length) return;
+      if (j.yf) rowsG.sort(function(a, b) { return String(b[j.yf]).localeCompare(String(a[j.yf])); });
+      var arec = rowsG[0], annee = j.yf ? arec[j.yf] : null, raw = num(arec.value);
+      var snap = arec.code_isd ? await fetchDreesComparatif(j.ds, j.df, arec.code_isd, j.yf, annee, 1, j.lf, j.g.label) : null;
+      var vals = snap ? Object.keys(snap).map(function(k) { return snap[k]; }).filter(function(x) { return typeof x === 'number' && !isNaN(x); }) : [raw];
+      var mxv = Math.max.apply(null, vals.map(Math.abs)), lab = j.g.label, nl = normFr(lab);
+      var isRate = /%|taux|part |proportion|pourcentage|ratio/.test(nl) || /%/.test(lab);
+      var scale = (isRate && mxv <= 1.0001) ? 100 : 1, unit = '', fmtName;
+      if (isRate && (scale === 100 || /%/.test(lab))) { unit = '%'; fmtName = 'pct1'; }
+      else if (/€|euro|depense|montant|cout|budget/.test(nl)) { unit = '€'; fmtName = 'eur0'; }
+      else if (vals.every(function(x) { return Number.isInteger(x); })) fmtName = 'int';
+      else fmtName = 'dec1';
+      var id = 'drees_' + j.ds + '_' + hashStr(fuseFr(lab));
+      var isNew = prevIds.indexOf(id) < 0 && prevIds.length > 0;
+      var existing = DREES_META.find(function(m) { return m.id === id; });
+      var entry = existing || { id: id, occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
+        total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false };
+      entry.label = lab.length > 90 ? lab.slice(0, 88) + '…' : lab;
+      entry.unit = unit; entry.fmt = fmtName; entry.themes = dreesThemes(lab, j.ds);
+      entry.aude = raw * scale; entry.annee = annee;
+      entry.source = 'DREES — data.drees (détecté automatiquement, indicateur: ' + lab + ')';
+      entry.desc = 'Indicateur détecté automatiquement dans le jeu « ' + j.ds + ' » : ' + lab + '. Unité et format déduits du libellé.';
+      entry.isNew = isNew;
+      if (!existing) DREES_META.push(entry);
+      var serie = {};
+      rowsG.forEach(function(rr) { var y = j.yf ? rr[j.yf] : null; if (y != null && serie[y] === undefined) serie[y] = num(rr.value) * scale; });
+      if (setTs(id, '11', serie)) entry.has_ts = true;
+      if (snap && Object.keys(snap).length > 1) {
+        var sm = {}; Object.keys(snap).forEach(function(k) { sm[k] = snap[k] * scale; });
+        DREES_SNAP[id] = sm;
+        var fr2 = statsAndRankFor(sm, null), st2 = statsAndRankFor(sm, STRATE), oc2 = statsAndRankFor(sm, OCC);
+        entry.stats_fr = fr2.stats; entry.rank_fr = fr2.rank; entry.total_fr = fr2.total; entry.fra = fr2.stats.mean;
+        entry.stats_strate = st2.stats; entry.rank_strate = st2.rank; entry.total_strate = st2.total;
+        entry.stats_occ = oc2.stats; entry.rank_occ = oc2.rank; entry.total_occ = oc2.total; entry.occ = oc2.stats.mean;
+      } else { DREES_SNAP[id] = { '11': raw * scale }; }
+      if (isNew) newCount++;
+      autoAdded++;
+    }; }), 5);
+    if (nbLabels > autoJobs.length) addLog('⚠️', 'DREES : ' + nbLabels + ' libellés détectés, seuls les ' + autoJobs.length + ' premiers sont chargés automatiquement.');
+  } catch (eAutoD) {
+    addLog('⚠️', 'DREES : détection automatique interrompue (' + eAutoD.message + ').');
+  }
+
   if (tsTasks.length) {
     var tsErr = null, tsOk = 0, jobs = [];
     tsTasks.forEach(function(t) {
@@ -2437,7 +2605,7 @@ async function loadDREES() {
     await runPool(jobs, 6);
     addLog(tsOk ? 'ℹ️' : '⚠️', 'DREES : évolution — série de l\'Aude pour ' + tsTasks.length + ' indicateurs ; moyennes France/Occitanie : ' + tsOk + '/' + (tsTasks.length * 2) + (tsErr ? ' (erreur : ' + tsErr + ')' : '') + '.');
   }
-  addLog(updated ? '✅' : '⚠️', 'DREES : ' + updated + '/' + DREES_RULES.length + ' indicateurs mis à jour en direct.');
+  addLog((updated || autoAdded) ? '✅' : '⚠️', 'DREES : ' + (updated + autoAdded) + ' indicateur(s) chargé(s) (' + updated + '/' + DREES_RULES.length + ' configurés + ' + autoAdded + ' détectés automatiquement).');
 }
 
 window.onload = function() {
