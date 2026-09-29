@@ -1812,52 +1812,87 @@ async function loadCNSA() {
     var fields = await getCnsaFields('synthese');
     if (!fields.length) { addLog('⚠️', 'CNSA : jeu de données indisponible ou schéma illisible.'); return; }
     var dsId = CNSA_RESOLVED_ID.synthese;
-    var depField = findCnsaDim(fields, 'dept');
     var yearField = findCnsaDim(fields, 'year');
-    if (!depField) { addLog('⚠️', 'CNSA : champ département introuvable dans le schéma de ' + dsId + '.'); return; }
 
-    // Toutes les lignes de l'Aude, triées par année décroissante (sert aussi à l'évolution).
-    var url11 = CNSA_BASE + dsId + '/records?where=' + encodeURIComponent(depField + '="11"') +
-      (yearField ? ('&order_by=' + encodeURIComponent(yearField + ' DESC')) : '') + '&limit=50';
-    var r11 = await fetch(url11);
-    if (!r11.ok) throw new Error('CNSA HTTP ' + r11.status);
-    var d11 = await r11.json();
-    var rows11 = d11.results || [];
-    if (!rows11.length) { addLog('⚠️', 'CNSA : aucune ligne pour l\'Aude (champ ' + depField + '="11" sur ' + dsId + ').'); return; }
+    // 1) Lecture complète du jeu (≈ 100 départements × quelques années) : on ne filtre PAS côté
+    //    serveur, car le format du champ département (« 11 », « 011 », « Aude »…) n'est pas garanti.
+    var allRows = [];
+    for (var pg = 0; pg < 100; pg++) {
+      var rp = await fetch(CNSA_BASE + dsId + '/records?limit=100&offset=' + (pg * 100));
+      if (!rp.ok) {
+        if (pg === 0) throw new Error('CNSA HTTP ' + rp.status);
+        addLog('⚠️', 'CNSA : lecture interrompue à la page ' + (pg + 1) + ' (HTTP ' + rp.status + ').');
+        break;
+      }
+      var dp = await rp.json();
+      var resp = dp.results || [];
+      allRows = allRows.concat(resp);
+      if (resp.length < 100) break;
+    }
+    if (!allRows.length) { addLog('⚠️', 'CNSA : le jeu ' + dsId + ' ne renvoie aucune ligne.'); return; }
+
+    // 2) Détection du champ « code département » d'après les VALEURS réelles (et non le seul nom).
+    function cnsaDeptCode(v) {
+      if (v === null || v === undefined) return null;
+      var m = String(v).trim().toUpperCase().match(/^0*(\d{1,3}|2[AB])(?=\D|$)/);
+      if (!m) return null;
+      var c = m[1];
+      return c.length === 1 ? '0' + c : c;
+    }
+    var deptLike = fields.filter(function(f) {
+      var t = normFrCnsa(f.name + ' ' + (f.label || ''));
+      return /dep|geo|territoire|insee|code/.test(t);
+    });
+    var codeField = null, bestScore = 0;
+    deptLike.forEach(function(f) {
+      var ok = 0;
+      allRows.forEach(function(rr) { if (cnsaDeptCode(rr[f.name]) !== null) ok++; });
+      var score = ok / allRows.length;
+      // Champs ressemblant à un millésime (2023…) exclus par cnsaDeptCode (4 chiffres) ; on exige 90 %.
+      if (score >= 0.9 && score > bestScore) { bestScore = score; codeField = f.name; }
+    });
+    var nameField = null;
+    fields.forEach(function(f) {
+      if (nameField) return;
+      if (allRows.some(function(rr) { return normFrCnsa(rr[f.name]).trim() === 'aude'; })) nameField = f.name;
+    });
+    var depField = codeField || nameField;
+
+    // 3) Filtrage côté client : lignes de l'Aude, triées par année décroissante.
+    function isAude(rr) {
+      if (codeField) return cnsaDeptCode(rr[codeField]) === '11';
+      return normFrCnsa(rr[nameField]).trim() === 'aude';
+    }
+    var rows11 = depField ? allRows.filter(isAude) : [];
+    if (yearField) rows11.sort(function(a, b) { return String(b[yearField]).localeCompare(String(a[yearField])); });
+    if (!rows11.length) {
+      var sample = deptLike.slice(0, 4).map(function(f) { return f.name + '=' + JSON.stringify(allRows[0][f.name]); }).join(', ');
+      addLog('⚠️', 'CNSA : aucune ligne pour l\'Aude sur ' + dsId + ' (' + allRows.length + ' lignes lues, champ code=' + (codeField || 'introuvable') + ', champ nom=' + (nameField || 'introuvable') + '). Exemple : ' + sample);
+      return;
+    }
+    addLog('ℹ️', 'CNSA : ' + allRows.length + ' lignes lues, ' + rows11.length + ' pour l\'Aude (champ ' + depField + ').');
     var rec = rows11[0];
     var period = yearField ? rec[yearField] : null;
 
-    // Comparatif national à la même période (même logique que pour la CAF : pas de « where »
-    // fiable sur l'année seule, on lit les pages triées par année décroissante et on filtre).
+    // 4) Comparatif national à la même période (uniquement si on dispose d'un champ code).
     var natMap = {};
-    try {
-      var natRows = [];
-      for (var pg = 0; pg < 5; pg++) {
-        var natUrl = CNSA_BASE + dsId + '/records?limit=100&offset=' + (pg * 100) + (yearField ? ('&order_by=' + encodeURIComponent(yearField + ' DESC')) : '');
-        var rNat = await fetch(natUrl);
-        if (!rNat.ok) { addLog('⚠️', 'CNSA : comparatif national indisponible (HTTP ' + rNat.status + '), valeur Aude seule.'); break; }
-        var dNat = await rNat.json();
-        var resNat = dNat.results || [];
-        var samePeriod = yearField ? resNat.filter(function(rr) { return String(rr[yearField]) === String(period); }) : resNat;
-        natRows = natRows.concat(samePeriod);
-        if (resNat.length < 100) break;
-      }
-      if (natRows.length) addLog('ℹ️', 'CNSA : comparatif national récupéré sur ' + natRows.length + ' ligne(s) (période ' + period + ').');
-      natRows.forEach(function(rr) {
-        var dc = rr[depField]; if (dc === null || dc === undefined) return;
-        dc = String(dc); if (dc.length === 1) dc = '0' + dc;
+    if (codeField) {
+      allRows.forEach(function(rr) {
+        if (yearField && String(rr[yearField]) !== String(period)) return;
+        var dc = cnsaDeptCode(rr[codeField]); if (dc === null) return;
         Object.keys(rr).forEach(function(k) {
           if (typeof rr[k] !== 'number') return;
           if (!natMap[k]) natMap[k] = {};
           natMap[k][dc] = rr[k];
         });
       });
-    } catch (eNat) {
-      addLog('⚠️', 'CNSA : comparatif national indisponible (' + eNat.message + '), valeur Aude seule.');
+      addLog('ℹ️', 'CNSA : comparatif national sur ' + Object.keys(natMap).length + ' champ(s) numérique(s) (période ' + period + ').');
+    } else {
+      addLog('⚠️', 'CNSA : pas de champ code département exploitable, valeur Aude seule.');
     }
 
+    var skip = {}; skip[depField] = 1; if (codeField) skip[codeField] = 1; if (nameField) skip[nameField] = 1; if (yearField) skip[yearField] = 1;
     // On garde les champs numériques hors clés techniques (département/année/codes/libellés).
-    var skip = {}; skip[depField] = 1; if (yearField) skip[yearField] = 1;
     var excludePattern = /code|siren|insee\b|^id$|_id$|region|libelle|^nom|label/;
     var numericFields = fields.filter(function(f) {
       if (skip[f.name]) return false;
