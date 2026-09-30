@@ -366,6 +366,58 @@ function showTab(id, btn) {
   if (id === 'nouveautes') buildNouveautes();
 }
 
+// ---- Indicateurs masqués ----
+// Liste PERMANENTE (dans le code) : ajoutez ici les identifiants à ne jamais afficher, ex. ['drees_financiers_1abc', 'caf_indrsa'].
+var HIDDEN_INDICATORS = [];
+// Liste PERSONNELLE : bouton « Masquer » dans la fiche d'un indicateur, mémorisée par le navigateur.
+var HIDDEN_LOCAL = [];
+try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem('obs_aude_hidden') || '[]') || []; } catch (eLs) { HIDDEN_LOCAL = []; }
+var HIDDEN_METAS = [];
+function isHiddenInd(id) { return HIDDEN_INDICATORS.indexOf(id) >= 0 || HIDDEN_LOCAL.indexOf(id) >= 0; }
+function saveHidden() { try { localStorage.setItem('obs_aude_hidden', JSON.stringify(HIDDEN_LOCAL)); } catch (eLs) {} }
+function refreshAllViews() {
+  rebuildAllMeta();
+  if (typeof buildDash === 'function') buildDash();
+  if (typeof renderRankIndBar === 'function') renderRankIndBar();
+  if (typeof renderRankTable === 'function') renderRankTable();
+  if (typeof renderEvoIndBar === 'function') renderEvoIndBar();
+  if (typeof drawEvoChart === 'function') drawEvoChart();
+  if (typeof renderCarteIndBar === 'function') renderCarteIndBar();
+  if (typeof colorMap === 'function') colorMap();
+  var ex = document.getElementById('export');
+  if (typeof buildExport === 'function' && ex && ex.innerHTML) buildExport();
+}
+function hideInd(id) {
+  if (HIDDEN_LOCAL.indexOf(id) < 0) HIDDEN_LOCAL.push(id);
+  saveHidden();
+  document.getElementById('modal-overlay').classList.remove('on');
+  refreshAllViews();
+}
+function unhideInd(id) {
+  HIDDEN_LOCAL = HIDDEN_LOCAL.filter(function(x) { return x !== id; });
+  saveHidden();
+  refreshAllViews();
+  openHiddenPanel();
+}
+function unhideAll() { HIDDEN_LOCAL = []; saveHidden(); refreshAllViews(); document.getElementById('modal-overlay').classList.remove('on'); }
+function copyHiddenIds() {
+  var txt = JSON.stringify(HIDDEN_LOCAL);
+  if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function() { alert('Liste copiée. Collez-la dans HIDDEN_INDICATORS (dans le code) pour la rendre permanente :\n' + txt); });
+  else prompt('Copiez cette liste :', txt);
+}
+function openHiddenPanel() {
+  var h = '<h3>Indicateurs masqués</h3><div class="modal-meta">Ils n\'apparaissent plus dans le tableau de bord, les classements, la carte, l\'évolution ni le PDF.</div>';
+  if (!HIDDEN_METAS.length) h += '<p style="color:#889;font-size:12px;margin:14px 0">Aucun indicateur masqué.</p>';
+  HIDDEN_METAS.forEach(function(m) {
+    var perm = HIDDEN_INDICATORS.indexOf(m.id) >= 0;
+    h += '<div class="modal-rank-row"><span style="flex:1;margin-right:8px">' + m.label + '<br><span style="font-size:9px;color:#99a">' + m.id + '</span></span>' +
+      (perm ? '<span style="font-size:10px;color:#889">masqué dans le code</span>' : '<button class="theme-btn" data-ind-id="' + m.id + '" onclick="unhideInd(this.dataset.indId)">Rétablir</button>') + '</div>';
+  });
+  if (HIDDEN_LOCAL.length) h += '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><button class="theme-btn" onclick="unhideAll()">Tout rétablir</button><button class="theme-btn" onclick="copyHiddenIds()">Copier la liste (pour la rendre permanente)</button></div>';
+  document.getElementById('modal-content').innerHTML = h;
+  document.getElementById('modal-overlay').classList.add('on');
+}
+
 function rebuildAllMeta() {
   ALL_META = [];
   
@@ -388,6 +440,11 @@ function rebuildAllMeta() {
   if (typeof AUDE_META !== 'undefined') AUDE_META.forEach(function(m) { ALL_META.push(m); });
   if (typeof CNSA_META !== 'undefined') CNSA_META.forEach(function(m) { ALL_META.push(m); });
   
+  // Retrait des indicateurs masqués
+  HIDDEN_METAS = ALL_META.filter(function(m) { return isHiddenInd(m.id); });
+  if (HIDDEN_METAS.length) ALL_META = ALL_META.filter(function(m) { return !isHiddenInd(m.id); });
+  var hb = document.getElementById('hidden-btn'); if (hb) hb.textContent = '🚫 Masqués (' + HIDDEN_METAS.length + ')';
+
   if (typeof DREES_SNAP !== 'undefined') {
     ALL_META.forEach(function(m) {
       if (DREES_SNAP[m.id] && Object.keys(DREES_SNAP[m.id]).length >= 10) MAP_CARTEABLE[m.id] = true;
@@ -402,6 +459,7 @@ function buildDash() {
   THEMES.forEach(function(th) {
     html += '<button class="theme-btn'+(th.id===currentThemeDash?' on':'')+'" data-theme-id="'+th.id+'" onclick="setThemeDash(this.dataset.themeId)">' + th.lbl + '</button>';
   });
+  html += '<button class="theme-btn" id="hidden-btn" style="margin-left:auto" onclick="openHiddenPanel()">🚫 Masqués (' + HIDDEN_METAS.length + ')</button>';
   html += '</div>';
   html += '<div id="dash-cards"></div>';
   container.innerHTML = html;
@@ -624,6 +682,7 @@ function openModal(indId) {
   if (m.stats_occ && m.stats_occ.mean) html += statsBlock('Statistiques — Occitanie', m.stats_occ);
   if (m.stats_fr && m.stats_fr.mean) html += statsBlock('Statistiques — France métropolitaine', m.stats_fr);
   
+  html += '<div style="margin-top:14px;padding-top:10px;border-top:1px solid #e1e5ea"><button class="theme-btn" data-ind-id="' + m.id + '" onclick="hideInd(this.dataset.indId)">🚫 Masquer cet indicateur</button> <span style="font-size:9px;color:#99a">id : ' + m.id + '</span></div>';
   document.getElementById('modal-content').innerHTML = html;
   document.getElementById('modal-overlay').classList.add('on');
 }
