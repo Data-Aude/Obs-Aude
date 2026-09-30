@@ -79,7 +79,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 #classement .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 #classement .theme-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .ind-select-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.ind-btn{background:#fff;border:1px solid #c0d8ec;color:#5a7a9a;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
+.ind-btn{text-align:left;white-space:normal;max-width:100%;background:#fff;border:1px solid #c0d8ec;color:#5a7a9a;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
 .ind-btn:hover{background:#e8f2fa;border-color:#8ab0cc}
 .ind-btn.on{background:#4472C4;border-color:#4472C4;color:#fff}
 .dep-select{background:#fff;border:1px solid #c0d8ec;color:#1a2845;padding:5px 8px;border-radius:5px;font-size:12px;font-family:inherit;cursor:pointer}
@@ -292,6 +292,27 @@ var refreshLog       = [];
 var mapBuilt         = false;
 var geoCache         = null;
 var newCount         = 0;
+
+// Définition affichée (info-bulle, fenêtre de détail, PDF) : jamais vide.
+function defOf(m) {
+  if (m.desc) return m.desc;
+  var src = m.source ? String(m.source).split(' — ')[0] : '';
+  return 'Indicateur « ' + m.label + ' »' + (src ? ' (source : ' + src + ')' : '') + (m.unit ? ', exprimé en ' + m.unit : '') + '.';
+}
+// Rend lisible un nom technique de champ (depenses_pa_hab → « Dépenses personnes âgées habitant »).
+var FR_TOKENS = { depenses:'dépenses', depense:'dépense', beneficiaires:'bénéficiaires', beneficiaire:'bénéficiaire', ages:'âgés', agees:'âgées',
+  age:'âge', handicapees:'handicapées', handicapes:'handicapés', hab:'habitant', pa:'personnes âgées', ph:'personnes handicapées', tx:'taux', nb:'nombre',
+  pop:'population', couv:'couverture', etablissement:'établissement', etablissements:'établissements', hebergement:'hébergement', foy:'foyers',
+  ben:'bénéficiaires', mtt:'montant', cnsa:'CNSA', apa:'APA', pch:'PCH', mdph:'MDPH', ehpad:'EHPAD', esms:'ESMS', saad:'SAAD', ssiad:'SSIAD',
+  rsa:'RSA', aah:'AAH', eur:'€', moy:'moyenne', tot:'total', dep:'département', annee:'année', reference:'référence', prevention:'prévention',
+  medico:'médico', social:'social', sociaux:'sociaux', equipement:'équipement', equipements:'équipements', coordination:'coordination' };
+function prettyName(raw) {
+  var t = String(raw).replace(/^ind(?=[a-z])/i, '').split(/[_\s]+/).filter(Boolean).map(function(w) {
+    var k = normFrCnsa(w); return FR_TOKENS[k] || w.toLowerCase();
+  }).join(' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function stripHtml(t) { return String(t || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(); }
 
 // Formatage français avec séparateur de milliers (espace insécable) : 25 484,6
 function nf(val, d) {
@@ -518,6 +539,7 @@ function buildCard(m) {
 
   var ttHtml = '';
   // Titre & Valeur Aude
+  ttHtml += '<div style="font-size:12.5px;font-weight:700;color:#fff;line-height:1.35;margin-bottom:6px">' + m.label + '</div>';
   if (m.aude !== undefined && m.aude !== null) {
     ttHtml += '<div style="font-size:16px;font-weight:800;color:#f4a44a;margin-bottom:4px">' +
       '📍 Aude (11) : ' + fmt(m.aude, m.fmt, m.unit) + (m.annee ? ' <span style="font-size:9px;font-weight:400;opacity:.7">('+m.annee+')</span>' : '') +
@@ -530,9 +552,7 @@ function buildCard(m) {
   }
   
   // Description
-  if (m.desc) {
-    ttHtml += '<div style="color:#ccd;font-size:10px;line-height:1.4;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:5px">'+m.desc+'</div>';
-  }
+  ttHtml += '<div style="color:#ccd;font-size:10px;line-height:1.4;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:5px"><b style="color:#8ab">Définition :</b> ' + defOf(m) + '</div>';
   
   // Tableau complet de statistiques comparatives dans l'info-bulle
   ttHtml += '<div style="font-size:9.5px;color:#8ab;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">Comparatif Région & Strate</div>' +
@@ -572,9 +592,7 @@ function openModal(indId) {
   var html = '<h3>' + m.label + '</h3>';
   html += '<div class="modal-meta">' + (m.source||'') + (m.annee ? ' · '+m.annee : '') + (m.unit ? ' · Unité: '+m.unit : '') + '</div>';
   
-  if (m.desc) {
-    html += '<div class="modal-section"><p style="color:#595959;font-size:12px;line-height:1.5">' + m.desc + '</p></div>';
-  }
+  html += '<div class="modal-section"><h4>Définition</h4><p style="color:#595959;font-size:12px;line-height:1.5">' + defOf(m) + '</p></div>';
   
   html += '<div class="modal-section"><h4>Valeurs de référence</h4>';
   html += '<div class="modal-grid">';
@@ -1510,7 +1528,7 @@ async function generatePdf() {
       '<div class="pdf-page-head"><span>Observatoire social — Département de l\'Aude</span><span>' + today + '</span></div>' +
       '<h3 class="pdf-title">' + m.label + (m.unit ? ' <span style="font-weight:400;color:#889;font-size:13px">(' + m.unit + ')</span>' : '') + '</h3>' +
       '<div class="pdf-value"><span class="pdf-big">Aude : ' + fmt(m.aude, m.fmt, m.unit) + '</span>' + (m.annee ? ' <span style="color:#889">(' + m.annee + ')</span>' : '') + '</div>' +
-      (exportOpts.def && m.desc ? '<p class="pdf-desc">' + m.desc + '</p>' : '');
+      (exportOpts.def ? '<p class="pdf-desc"><b>Définition :</b> ' + defOf(m) + '</p>' : '');
     if (exportOpts.synth) {
       html += '<table class="pdf-sum pdf-stats"><thead><tr><th>Échelle</th><th>Moyenne</th><th>Médiane</th><th>1er quartile</th><th>3e quartile</th><th>Rang de l\'Aude</th></tr></thead><tbody>' +
         statRow('Strate (' + (m.total_strate || '?') + ' dép.)', m.stats_strate, m.rank_strate, m.total_strate) +
@@ -1641,8 +1659,23 @@ async function loadCAF() {
         if (/aah|aeeh|ajpp|handi/.test(kn)) th = ['handicap']; else if (/ajpa|aidant|senior|vieil/.test(kn)) th = ['ages'];
         if (money) th.push('financier');
         CAF_FIELDS.push({ key: k, auto: true,
-          label: (cafSchema[k] && cafSchema[k].label) || k.replace(/^ind/, '').replace(/_/g, ' ').trim(),
-          fmt: money ? 'eur0' : (Number.isInteger(rec[k]) ? 'int' : 'dec1'), unit: money ? '€' : '', themes: th });
+          label: (function() { var l = cafSchema[k] && stripHtml(cafSchema[k].label); return (l && !/^[a-z0-9_]+$/.test(l)) ? l : prettyName(l || k); })(),
+          fmt: money ? 'eur0' : (Number.isInteger(rec[k]) ? 'int' : 'dec1'), unit: money ? '€' : '', themes: th,
+          def: (function() {
+            var sd = cafSchema[k] && stripHtml(cafSchema[k].description); if (sd) return sd;
+            var lbl = (cafSchema[k] && stripHtml(cafSchema[k].label)) || prettyName(k), out = [];
+            if (/^ind?foy|foy/.test(kn)) out.push('Nombre de foyers allocataires concernés dans le département.');
+            else if (/^ind?ben|ben/.test(kn)) out.push('Nombre de bénéficiaires dans le département.');
+            else if (money) out.push('Montant total versé dans le mois aux allocataires du département.');
+            else out.push('Donnée mensuelle publiée par la CAF pour le département (« ' + lbl + ' »).');
+            var CAFG = { RSA: 'revenu de solidarité active', AAH: 'allocation aux adultes handicapés', AEEH: 'allocation d\'éducation de l\'enfant handicapé',
+              AJPA: 'allocation journalière du proche aidant', AJPP: 'allocation journalière de présence parentale', APL: 'aide personnalisée au logement',
+              ALF: 'allocation de logement familiale', ALS: 'allocation de logement sociale', AF: 'allocations familiales', CF: 'complément familial',
+              ARS: 'allocation de rentrée scolaire', ASF: 'allocation de soutien familial', PPA: 'prime d\'activité', PAJE: 'prestation d\'accueil du jeune enfant' };
+            var sg = []; (kn.split(/[_\s]+/)).forEach(function(w) { var u = w.toUpperCase(); if (CAFG[u]) sg.push(u + ' = ' + CAFG[u]); });
+            if (sg.length) out.push('Sigle : ' + sg.join(' ; ') + '.');
+            return out.join(' ');
+          })() });
         nbAutoCaf++;
       });
       if (nbAutoCaf) addLog('ℹ️', 'CAF : ' + nbAutoCaf + ' indicateur(s) supplémentaire(s) détecté(s) automatiquement.');
@@ -1667,7 +1700,7 @@ async function loadCAF() {
         has_ts: false,
         source: 'CAF — données mensuelles',
         annee: dateRef,
-        desc: (CAF_DEFS[f.key] || (f.auto ? 'Indicateur détecté automatiquement (champ ' + f.key + ').' : 'Donnée mensuelle CAF.')) + ' Valeur du dernier mois publié (' + dateRef + ').',
+        desc: (CAF_DEFS[f.key] || (f.auto ? f.def : 'Donnée mensuelle CAF.')) + ' Valeur du dernier mois publié (' + dateRef + ').',
         isNew: isNew && prevIds.length > 0
       };
 
@@ -1871,7 +1904,8 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
     if (!rs.ok) return { n: 0, why: 'schéma HTTP ' + rs.status };
     var raw = await rs.json();
     fields = Array.isArray(raw.fields) ? raw.fields : (raw.dataset && Array.isArray(raw.dataset.fields) ? raw.dataset.fields : []);
-    if (info.count == null) { var mm = raw.metas && (raw.metas.default || raw.metas); info.count = mm ? mm.records_count : null; }
+    var mm = raw.metas && (raw.metas.default || raw.metas);
+    if (mm) { if (info.count == null) info.count = mm.records_count; if (!info.title) info.title = mm.title; if (!info.description) info.description = mm.description; }
   }
   if (!fields.length) return { n: 0, why: 'pas de table interrogeable' };
   if (info.count != null && info.count > CNSA_MAX_ROWS) return { n: 0, why: info.count + ' lignes : jeu détaillé' };
@@ -1937,6 +1971,13 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
   fields.forEach(function(f) {
     if (skip[f.name] || excludePattern.test(normFrCnsa(f.name))) return;
     var ln = latestNum(f); if (!ln) return;
+    // Nom lisible : libellé officiel s'il est en clair, sinon nom technique « traduit » ; contexte PA / PH ajouté si absent
+    var rawLbl = stripHtml(f.label || '');
+    var human = rawLbl && !/^[a-z0-9_]+$/.test(rawLbl) ? rawLbl : prettyName(rawLbl || f.name);
+    human = human.charAt(0).toUpperCase() + human.slice(1);
+    var nl0 = normFrCnsa(human), idn = normFrCnsa(dsId);
+    if (/(^|_)pa(_|$)/.test(idn) && !/personnes agees|\bpa\b/.test(nl0)) human += ' — personnes âgées';
+    else if (/(^|_)ph(_|$)/.test(idn) && !/personnes handicapees|\bph\b|handicap/.test(nl0)) human += ' — personnes handicapées';
     var nameNorm = normFrCnsa(f.name + ' ' + (f.label || ''));
     var fmtName = /taux|pct|couverture|part_|pourcentage/.test(nameNorm) ? 'pct1' : (/depense|montant|cout|euro|eur\b/.test(nameNorm) ? 'eur0' : 'dec1');
     var id = 'cnsa_' + dsId + '_' + f.name;
@@ -1952,12 +1993,12 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
       if (mxa > 0 && mxa <= 1.0001) sc = 100;
     }
     var entry = {
-      id: id, label: f.label || f.name,
+      id: id, label: human,
       unit: fmtName === 'pct1' ? '%' : (fmtName === 'eur0' ? '€' : ''), fmt: fmtName, themes: th,
       aude: ln.v * sc, occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
       total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false,
       source: 'CNSA — Data Autonomie', annee: ln.y,
-      desc: 'Indicateur détecté automatiquement dans le jeu CNSA « ' + dsId + ' » (champ ' + f.name + ').',
+      desc: (stripHtml(f.description) || (human + '.')) + ' Indicateur issu du jeu CNSA « ' + (stripHtml(info.title) || dsId) + ' »' + (info.description ? ' : ' + stripHtml(info.description).slice(0, 260) + (stripHtml(info.description).length > 260 ? '…' : '') : '.') + ' (champ source : ' + f.name + ').',
       isNew: isNew && prevIds.length > 0
     };
     var snapMap = (natByYear[yearField ? String(ln.y) : '_'] || {})[f.name];
@@ -2003,7 +2044,7 @@ async function loadCNSA() {
         res.forEach(function(x) {
           var did = x.dataset_id || (x.dataset && x.dataset.dataset_id); if (!did) return;
           var mt = x.metas && (x.metas.default || x.metas);
-          info[did] = { count: mt ? mt.records_count : null, fields: (x.fields && x.fields.length) ? x.fields : null };
+          info[did] = { count: mt ? mt.records_count : null, fields: (x.fields && x.fields.length) ? x.fields : null, title: mt ? mt.title : null, description: mt ? mt.description : null };
           if (ids.indexOf(did) < 0) ids.push(did);
         });
         if (res.length < 100) break;
@@ -2154,15 +2195,16 @@ async function loadINSEE() {
       var mm;
       if ((mm = /^Y_LT(\d+)$/.exec(code))) return 'moins de ' + mm[1] + ' ans';
       if ((mm = /^Y_GE(\d+)$/.exec(code))) return mm[1] + ' ans et plus';
-      if ((mm = /^Y(\d+)T(\d+)$/.exec(code))) return 'de ' + mm[1] + ' à ' + mm[2] + ' ans';
-      return 'de la tranche ' + code;
+      if ((mm = /^Y(\d+)T(\d+)$/.exec(code))) return mm[1] + '-' + mm[2] + ' ans';
+      if ((mm = /^Y(\d+)$/.exec(code))) return 'personnes de ' + mm[1] + ' ans';
+      return null;
     }
     Object.keys(ageSeen).forEach(function(code) {
       if (knownAge[code]) return;
-      var al = ageLabel(code);
-      defs.push(['insee_age_' + code.toLowerCase(), 'Part des ' + al, '%', 'pct1',
+      var al = ageLabel(code), lbl = al ? 'Part des ' + al : 'Part de la tranche d\'âge « ' + code + ' »';
+      defs.push(['insee_age_' + code.toLowerCase(), lbl, '%', 'pct1',
         function(d) { return d._T && d[code] != null ? d[code] / d._T * 100 : null; },
-        'Part de la population ' + al + ' (recensement INSEE, tranche ' + code + '), détectée automatiquement.', ['demographie']]);
+        lbl + ' dans la population du département : effectif de la tranche rapporté à la population totale (recensement de la population, INSEE).', ['demographie']]);
     });
     function meanOf(arr) { return arr.reduce(function(a, b) { return a + b; }, 0) / arr.length; }
     defs.forEach(function(df) {
@@ -2204,7 +2246,71 @@ async function loadINSEE() {
       ['insee_pauv', 'PR_MD60', 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) — Filosofi, INSEE.', ['demographie', 'social']],
       ['insee_nvmed', 'MED_SL', 'Niveau de vie médian', '€', 'eur0', 'Niveau de vie médian annuel par unité de consommation — Filosofi, INSEE.', ['demographie', 'social', 'financier']]
     ];
-    // Autres mesures Filosofi présentes dans les données : chacune devient un indicateur
+    // Autres mesures Filosofi présentes dans les données : chacune devient un indicateur, avec un nom en clair
+    var FILO = [
+      [/^S80_?S20/, 'Rapport S80/S20 des niveaux de vie', '', 'dec2', 'Rapport entre la masse de niveau de vie détenue par les 20 % les plus aisés (S80) et celle des 20 % les plus modestes (S20). Plus il est élevé, plus les inégalités de niveau de vie sont fortes (Filosofi, INSEE).'],
+      [/^(IR_)?D9_?D1|^RD_|^INTERDECILE/, 'Rapport interdécile D9/D1 du niveau de vie', '', 'dec2', 'Rapport entre le niveau de vie plancher des 10 % les plus aisés (9e décile) et le niveau de vie plafond des 10 % les plus modestes (1er décile). Mesure l\'étendue des inégalités (Filosofi, INSEE).'],
+      [/^GI|^GINI/, 'Indice de Gini du niveau de vie', '', 'dec2', 'Indicateur d\'inégalité de niveau de vie compris entre 0 (égalité parfaite) et 1 (inégalité maximale) (Filosofi, INSEE).'],
+      [/^Q1/, '1er quartile du niveau de vie', '€', 'eur0', 'Niveau de vie annuel en dessous duquel vivent 25 % de la population, par unité de consommation (Filosofi, INSEE).'],
+      [/^Q3/, '3e quartile du niveau de vie', '€', 'eur0', 'Niveau de vie annuel en dessous duquel vivent 75 % de la population, par unité de consommation (Filosofi, INSEE).'],
+      [/^D1(\D|$)/, '1er décile du niveau de vie', '€', 'eur0', 'Niveau de vie annuel en dessous duquel vivent les 10 % de personnes les plus modestes, par unité de consommation (Filosofi, INSEE).'],
+      [/^D9(\D|$)/, '9e décile du niveau de vie', '€', 'eur0', 'Niveau de vie annuel au-dessus duquel vivent les 10 % de personnes les plus aisées, par unité de consommation (Filosofi, INSEE).'],
+      [/^D(\d)(\D|$)/, null, '€', 'eur0', null],
+      [/^(IP|TP60_IP|PR_INT|INT_PAUV)/, 'Intensité de la pauvreté', '%', 'pct1', 'Écart relatif entre le niveau de vie médian des personnes pauvres et le seuil de pauvreté : plus il est élevé, plus la pauvreté est profonde (Filosofi, INSEE).'],
+      [/^SH_ACT_?SAL/, 'Part des salaires et traitements dans le revenu disponible', '%', 'pct1', 'Part des salaires et traitements dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_ACT_?CHO/, 'Part des indemnités de chômage dans le revenu disponible', '%', 'pct1', 'Part des indemnités de chômage dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_ACT_?NSAL|^SH_ACT_?IND/, 'Part des revenus d\'activités non salariées dans le revenu disponible', '%', 'pct1', 'Part des revenus des travailleurs indépendants dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_ACT/, 'Part des revenus d\'activité dans le revenu disponible', '%', 'pct1', 'Part des revenus d\'activité (salaires, indemnités de chômage, revenus non salariés) dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PEN|^SH_RET/, 'Part des pensions, retraites et rentes dans le revenu disponible', '%', 'pct1', 'Part des pensions, retraites et rentes dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PAT/, 'Part des revenus du patrimoine dans le revenu disponible', '%', 'pct1', 'Part des revenus du patrimoine et autres revenus dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PSA_?FAM|^SH_PF/, 'Part des prestations familiales dans le revenu disponible', '%', 'pct1', 'Part des prestations familiales dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PSA_?LOG|^SH_PL/, 'Part des allocations logement dans le revenu disponible', '%', 'pct1', 'Part des allocations logement dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PSA_?MIN|^SH_MIN/, 'Part des minima sociaux dans le revenu disponible', '%', 'pct1', 'Part des minima sociaux (RSA, AAH, etc.) dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_PSA/, 'Part des prestations sociales dans le revenu disponible', '%', 'pct1', 'Part des prestations sociales (familiales, logement, minima sociaux) dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^SH_IMP/, 'Part des impôts dans le revenu disponible', '%', 'pct1', 'Part des impôts directs dans le revenu disponible des ménages (Filosofi, INSEE).'],
+      [/^PR_MD60/, 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) (Filosofi, INSEE).']
+    ];
+    function filosofiInfo(code, mx) {
+      var up = String(code).toUpperCase();
+      for (var i = 0; i < FILO.length; i++) {
+        var mm = FILO[i][0].exec(up);
+        if (!mm) continue;
+        var lbl = FILO[i][1], def = FILO[i][4];
+        if (lbl === null) { // décile générique D2…D8
+          var dn = mm[1];
+          lbl = (dn === '1' ? '1er' : dn + 'e') + ' décile du niveau de vie';
+          def = 'Niveau de vie annuel en dessous duquel vivent ' + (parseInt(dn, 10) * 10) + ' % de la population, par unité de consommation (Filosofi, INSEE).';
+        }
+        return { label: lbl, unit: FILO[i][2], fmt: FILO[i][3], def: def };
+      }
+      var isPct = up.charAt(0) === 'P' && mx <= 100, isEur = !isPct && mx >= 1000;
+      var ml = melodiLbl[code];
+      if (!ml) unresolvedF.push(code);
+      return { label: ml || ('Indicateur Filosofi ' + prettyName(code.replace(/_SL$/i, ''))), unit: isPct ? '%' : (isEur ? '€' : ''), fmt: isPct ? 'pct1' : (isEur ? 'eur0' : 'dec2'),
+        def: (ml ? ml + '. ' : '') + 'Mesure « ' + code + ' » du dispositif Filosofi (revenus localisés sociaux et fiscaux, INSEE).' };
+    }
+    var melodiLbl = {}, unresolvedF = [];
+    try {
+      var rmm = await fetch('https://api.insee.fr/melodi/catalog/' + ds2, { headers: { 'Accept': 'application/json' } });
+      if (rmm.ok) {
+        var jmm = await rmm.json();
+        var frText = function(v) {
+          if (typeof v === 'string') return v;
+          if (Array.isArray(v)) { var fr = v.find(function(x) { return x && (x.lang === 'fr' || x.langue === 'fr'); }) || v[0]; return fr ? (fr.content || fr.value || fr.text || fr.label || null) : null; }
+          if (v && typeof v === 'object') return v.fr || v.FR || v['fr-FR'] || null;
+          return null;
+        };
+        (function walk(o, d) {
+          if (!o || typeof o !== 'object' || d > 12) return;
+          if (!Array.isArray(o)) {
+            var cd = o.id || o.code || o.value;
+            var lb = frText(o.label) || frText(o.labels) || frText(o.title) || frText(o.name) || frText(o.libelle);
+            if (typeof cd === 'string' && typeof lb === 'string' && cd.length <= 40 && lb.length > 2 && !melodiLbl[cd]) melodiLbl[cd] = stripHtml(lb);
+          }
+          Object.keys(o).forEach(function(k) { walk(o[k], d + 1); });
+        })(jmm, 0);
+      }
+    } catch (eMl) { /* dictionnaire seul */ }
     var knownF = {}; fdefs.forEach(function(fd) { knownF[fd[1]] = 1; });
     var measSeen = {};
     poolF.forEach(function(o) { var c = dim(o, measDim); if (c) measSeen[c] = 1; });
@@ -2212,11 +2318,10 @@ async function loadINSEE() {
       if (knownF[mc]) return;
       var vs = poolF.filter(function(o) { return dim(o, measDim) === mc; }).map(val).filter(function(v) { return v !== null; });
       if (!vs.length) return;
-      var mx = Math.max.apply(null, vs.map(Math.abs));
-      var isPct = mc.charAt(0) === 'P' && mx <= 100, isEur = !isPct && mx >= 1000;
-      fdefs.push(['insee_f_' + mc.toLowerCase(), mc, 'Filosofi — mesure ' + mc, isPct ? '%' : (isEur ? '€' : ''), isPct ? 'pct1' : (isEur ? 'eur0' : 'dec2'),
-        'Mesure Filosofi « ' + mc + ' » (INSEE), détectée automatiquement.', ['demographie', 'social']]);
+      var inf = filosofiInfo(mc, Math.max.apply(null, vs.map(Math.abs)));
+      fdefs.push(['insee_f_' + mc.toLowerCase(), mc, inf.label, inf.unit, inf.fmt, inf.def, ['demographie', 'social']]);
     });
+    if (unresolvedF.length) addLog('ℹ️', 'INSEE (Filosofi) : libellé français introuvable pour ' + unresolvedF.join(', ') + ' — transmettez ces codes pour qu\'ils soient nommés.');
     fdefs.forEach(function(fd) {
       var snap = {};
       poolF.forEach(function(o) { if (dim(o, measDim) !== fd[1]) return; var c = depCode(o), v = val(o); if (c && v !== null) snap[c] = v; });
@@ -2303,6 +2408,32 @@ function findDreesLabelField(fields) {
   var exact = ['libelle_indicateur', 'libelle_isd', 'indicateur', 'libelle'];
   var byName = fields.find(function(f) { return exact.indexOf(normFr(f.name)) >= 0; });
   return byName ? byName.name : null;
+}
+function dreesDsTitle(ds) {
+  return { financiers: 'ISD — Indicateurs financiers', enfance: 'ISD — Enfance et jeunesse en danger', depenses: 'Dépenses d\'aide sociale départementale' }[ds] || ds;
+}
+// Définition rédigée à partir du libellé officiel (les jeux ISD ne publient pas de champ « définition »).
+function dreesDefinition(label, ds, unit) {
+  var t = normFr(label), p = [];
+  var lab = String(label).replace(/\s+/g, ' ').trim(); lab = lab.charAt(0).toUpperCase() + lab.slice(1);
+  if (!/[.!?]$/.test(lab)) lab += '.';
+  p.push(lab);
+  if (/brutes?/.test(t) && /depense/.test(t)) p.push('Dépenses brutes : avant déduction des recouvrements, récupérations et remboursements.');
+  if (/depenses? totales/.test(t)) p.push('Ensemble des dépenses d\'aide sociale du département (RSA, enfance, handicap, personnes âgées).');
+  if (/par habitant/.test(t)) p.push('Rapporté à la population du département (montant par habitant).');
+  if (/par beneficiaire/.test(t)) p.push('Rapporté au nombre de bénéficiaires de la prestation (montant moyen par bénéficiaire).');
+  if (/pour 1 ?000|pour mille/.test(t)) p.push('Rapporté à 1 000 habitants de la population concernée.');
+  if (/pour 100 ?000/.test(t)) p.push('Rapporté à 100 000 habitants de la population concernée.');
+  if (/0-20 ans|0 a 20 ans/.test(t)) p.push('Population de référence : les 0-20 ans du département.');
+  else if (/0-17 ans|moins de 18 ans/.test(t)) p.push('Population de référence : les moins de 18 ans du département.');
+  if (/^taux|^part |^proportion/.test(t) && !/rapporte|population de reference/.test(p.join(' ').toLowerCase())) p.push('Proportion exprimée ' + (unit === '%' ? 'en pourcentage' : 'par rapport à la population concernée') + '.');
+  if (/^nombre|^effectif/.test(t)) p.push('Effectif recensé dans le département.');
+  if (/\bASE\b|aide sociale a l'enfance|placement|aemo|\baed\b/i.test(label)) p.push('ASE = aide sociale à l\'enfance : mesures éducatives (AED, AEMO) et mesures de placement.');
+  if (/\bAPA\b/.test(label)) p.push('APA = allocation personnalisée d\'autonomie, versée aux personnes âgées en perte d\'autonomie.');
+  if (/\bPCH\b|ACTP/.test(label)) p.push('PCH = prestation de compensation du handicap ; ACTP = allocation compensatrice pour tierce personne.');
+  if (/\bRSA\b/.test(label)) p.push('RSA = revenu de solidarité active.');
+  p.push('Source : DREES, indicateurs sociaux départementaux (ISD), jeu « ' + dreesDsTitle(ds) + ' » — dernier millésime publié.');
+  return p.join(' ');
 }
 // Sélection d'une LIGNE par libellé EXACT (insensible à la casse, aux accents, à la ponctuation).
 // Le jeu contient de nombreux libellés proches (« Part des AED dans l'ensemble des mesures d'ASE »
@@ -2479,6 +2610,9 @@ async function loadDREES() {
     };
     entry.aude = aude;
     entry.annee = annee;
+    entry.short = rule.label;
+    entry.label = rec[labelField] || rule.label; // titre officiel COMPLET (jamais raccourci)
+    if (rule.desc) entry.desc = rule.desc + ' Source : DREES, indicateurs sociaux départementaux (ISD), jeu « ' + dreesDsTitle(rule.ds) + ' ».';
     entry.source = 'DREES — data.drees (direct, indicateur: ' + rec[labelField] + ')';
     entry.isNew = isNew;
     if (!existing) DREES_META.push(entry);
@@ -2564,11 +2698,11 @@ async function loadDREES() {
       var existing = DREES_META.find(function(m) { return m.id === id; });
       var entry = existing || { id: id, occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
         total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false };
-      entry.label = lab.length > 90 ? lab.slice(0, 88) + '…' : lab;
+      entry.label = lab; // titre officiel complet
       entry.unit = unit; entry.fmt = fmtName; entry.themes = dreesThemes(lab, j.ds);
       entry.aude = raw * scale; entry.annee = annee;
       entry.source = 'DREES — data.drees (détecté automatiquement, indicateur: ' + lab + ')';
-      entry.desc = 'Indicateur détecté automatiquement dans le jeu « ' + j.ds + ' » : ' + lab + '. Unité et format déduits du libellé.';
+      entry.desc = dreesDefinition(lab, j.ds, unit);
       entry.isNew = isNew;
       if (!existing) DREES_META.push(entry);
       var serie = {};
