@@ -106,7 +106,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 /* CARTE */
 #carte .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 .map-wrap{display:flex;gap:16px;flex-wrap:wrap}
-#map-svg-wrap{flex:1;min-width:280px;height:420px;background:#fff;border:1px solid #d0e2f0;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+#map-svg-wrap{flex:1;min-width:280px;height:calc(100vh - 200px);min-height:480px;background:#fff;border:1px solid #d0e2f0;border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07)}
 .map-svg path{stroke:#edf2f7;stroke-width:0.5;cursor:pointer;transition:opacity .1s}
 .map-svg path.hl{stroke:#1a2845 !important;stroke-width:1.5}
 .map-svg path:hover{opacity:.8}
@@ -273,7 +273,6 @@ var THEMES = [
   {id:'ages', lbl:'Personnes âgées', cls:'th-ages'},
   {id:'handicap', lbl:'Handicap', cls:'th-handicap'},
   {id:'ase', lbl:'Enfance / ASE / Jeunesse', cls:'th-ase'},
-  {id:'financier', lbl:'Financier', cls:'th-financier'},
   {id:'social', lbl:'Social / Insertion', cls:'th-social'},
   {id:'aude', lbl:'Établissements Aude', cls:'th-aude'},
 ];
@@ -444,19 +443,23 @@ function cnsaTitleFor(fieldName) {
   for (var i = 0; i < CNSA_TITLES.length; i++) if (CNSA_TITLES[i][0].test(f)) return CNSA_TITLES[i][1];
   return null;
 }
-var FIN_RE = /depense|cout|financ|budget|recette|montant|credit|tarif|prix|dotation|subvention|epargne|dette|fiscal|concours|versement|verse|€|euro|\bfir\b|\bogd\b/;
 // Passe finale sur chaque indicateur : définition rédigée + thème « Financier » réservé aux vrais indicateurs financiers
+// Thème d'un indicateur déduit de son SUJET (PCH → handicap, APA → personnes âgées, RSA → insertion…)
+function inferThemes(m) {
+  var t = normFrCnsa((m.label || '') + ' ' + (m.techName || '') + ' ' + (m.id || '')), out = [];
+  if (/pch|actp|aah|aeeh|handic|mdph|(^|[^a-z])ph([^a-z]|$)|esat|\bime\b|sessad|camsp|cmpp|savs|samsah|\bmas\b|\bfam\b/.test(t)) out.push('handicap');
+  if (/\bapa\b|agee|ehpad|dependance|senior|\bgir\b|ajpa|aidant|usld|saad|ssiad|spasad|(^|[^a-z])pa([^a-z]|$)/.test(t)) out.push('ages');
+  if (/\base\b|enfan|jeunesse|mineur|placement|aemo|\baed\b|adoption|\bpmi\b|assistant.{0,3} (maternel|familial)|paje|prepare|\bcmg\b|(^|[^a-z])pn([^a-z]|$)|naissance|eaje|creche|garde/.test(t)) out.push('ase');
+  if (!out.length && /rsa|insertion|minima|\bppa\b|prime d.?activite|revenu|pauvrete|logement|\bapl\b|\balf\b|\bals\b|chomage|emploi|aide sociale|allocation|foyer|famille/.test(t)) out.push('social');
+  return out;
+}
+// Passe finale sur chaque indicateur : définition rédigée + thème défini par le sujet (plus de thème « Financier »)
 function normalizeMeta(m) {
   if (m.descAuto) m.desc = buildDefinition(m); else if (m.desc) m.desc = expandAcr(m.desc, m.source);
   if (m.themes && m.themes.indexOf('financier') >= 0) {
-    var financial = m.unit === '€' || m.fmt === 'eur0' || m.fmt === 'keur' || FIN_RE.test(normFrCnsa(m.label));
-    if (!financial) {
-      m.themes = m.themes.filter(function(x) { return x !== 'financier'; });
-      if (!m.themes.length) {
-        var tl = normFrCnsa(m.label);
-        m.themes.push(/enfan|ase\b|jeunesse|placement/.test(tl) ? 'ase' : (/agee|apa\b|ehpad|dependance/.test(tl) ? 'ages' : (/handic|pch|mdph|aah/.test(tl) ? 'handicap' : 'social')));
-      }
-    }
+    var rest = m.themes.filter(function(x) { return x !== 'financier'; }), inf = inferThemes(m);
+    var merged = inf.concat(rest.filter(function(x) { return inf.indexOf(x) < 0; }));
+    m.themes = merged.length ? merged : ['social'];
   }
 }
 
@@ -1152,7 +1155,7 @@ function buildEvolution() {
   var container = document.getElementById('evolution');
   
   var themeHTML = '<div class="theme-bar">';
-  THEMES.filter(function(t){ return t.id !== 'all'; }).forEach(function(th) {
+  THEMES.filter(function(t){ return t.id !== 'all' && t.id !== 'aude'; }).forEach(function(th) {
     themeHTML += '<button class="theme-btn'+(th.id===currentThemeEvo?' on':'')+'" data-theme-id="'+th.id+'" onclick="setThemeEvo(this.dataset.themeId)">' + th.lbl + '</button>';
   });
   themeHTML += '</div>';
@@ -1182,7 +1185,12 @@ function setThemeEvo(thId) {
   renderEvoIndBar();
 }
 
+function evoThemeHasTs(thId) {
+  return ALL_META.some(function(m) { return DREES_TS[m.id] && m.themes && (m.themes.indexOf(thId) >= 0 || (thId === 'ase' && m.themes.indexOf('jeunesse') >= 0)); });
+}
 function renderEvoIndBar() {
+  document.querySelectorAll('#evolution .theme-btn').forEach(function(b) { b.style.display = evoThemeHasTs(b.dataset.themeId) ? '' : 'none'; });
+  if (currentThemeEvo && !evoThemeHasTs(currentThemeEvo)) currentThemeEvo = null;
   var bar = document.getElementById('evo-ind-bar');
   if (!currentThemeEvo && typeof DREES_TS !== 'undefined') {
     var firstEvo = THEMES.filter(function(t){ return t.id !== 'all'; }).find(function(t){
@@ -1275,6 +1283,8 @@ function drawEvoChart() {
     });
   }
   
+  var strTs = ts['STR'] || null;
+  if (strTs) { var sv = years.map(function(y) { return strTs[y]; }).filter(function(v) { return typeof v === 'number'; }), av = years.map(function(y) { return audeTs[y]; }); var am = av.reduce(function(a, b) { return a + b; }, 0) / av.length; if (!sv.length || (am && (sv.reduce(function(a, b) { return a + b; }, 0) / sv.length) / am > 50)) strTs = null; }
   var compTs = selectedDeptEvo && ts[selectedDeptEvo] ? ts[selectedDeptEvo] : null;
   if (!compTs && selectedDeptEvo) {
     var compSnap = getSnap(currentIndEvo);
@@ -1289,6 +1299,7 @@ function drawEvoChart() {
   
   var allVals = years.map(function(y){return audeTs[y];});
   years.forEach(function(y){if(occTs[y]) allVals.push(occTs[y]);});
+  if (strTs) years.forEach(function(y){if(typeof strTs[y] === 'number') allVals.push(strTs[y]);});
   if (compTs) years.forEach(function(y){if(compTs[y]) allVals.push(compTs[y]);});
   
   var minV = Math.min.apply(null, allVals) * 0.95;
@@ -1333,6 +1344,7 @@ function drawEvoChart() {
   if (fraHasData) allVals = allVals.concat(fraVals);
   
   svgHtml += makePath(occTs, '#2E7D32', true);
+  if (strTs) svgHtml += makePath(strTs, '#B8860B', true);
   if (fraHasData) svgHtml += makePath(fraTs, '#4472C4', true);
   if (compTs) svgHtml += makePath(compTs, '#bb80f0', true);
   svgHtml += makePath(audeTs, '#ED7D31', false);
@@ -1347,6 +1359,7 @@ function drawEvoChart() {
   
   var legHtml = '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#ED7D31"></div>Aude (11)</div>';
   legHtml += '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#2E7D32;opacity:.7;border:1px dashed #2E7D32"></div>Moy. Occitanie</div>';
+  if (strTs) legHtml += '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#B8860B;opacity:.7;border:1px dashed #B8860B"></div>Moy. strate</div>';
   legHtml += '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#4472C4;opacity:.7;border:1px dashed #4472C4"></div>France métro.</div>';
   if (selectedDeptEvo) legHtml += '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#bb80f0"></div>' + (DEPTS[selectedDeptEvo]||selectedDeptEvo) + '</div>';
   legend.innerHTML = legHtml;
@@ -1469,8 +1482,8 @@ function loadGeo() {
 }
 
 function buildSVGMap(geo) {
-  var W=560, H=460;
-  var lonMin=-5.3,lonMax=9.8,latMin=41.2,latMax=51.2;
+  var H=640, lonMin=-5.3,lonMax=9.8,latMin=41.2,latMax=51.2;
+  var W=Math.round(H*(lonMax-lonMin)*Math.cos(46.2*Math.PI/180)/(latMax-latMin)); // proportions réelles (correction de la longitude à 46° N)
   function proj(lon,lat){ return [(lon-lonMin)/(lonMax-lonMin)*W, H-(lat-latMin)/(latMax-latMin)*H]; }
   function rings2path(rings) {
     return rings.map(function(ring){
@@ -1786,7 +1799,7 @@ function svgEvoAude(m) {
   a = {}; years.forEach(function(y) { a[y] = ts['11'][y]; });
   var audeMean = years.reduce(function(s, y) { return s + a[y]; }, 0) / years.length;
   var series = [{ k: '11', col: '#ED7D31', lbl: 'Aude', dash: false }];
-  [['OCC', '#2E7D32', 'Moy. Occitanie'], ['FRA', '#4472C4', 'Moy. France']].forEach(function(o) {
+  [['OCC', '#2E7D32', 'Occitanie'], ['STR', '#B8860B', 'Strate'], ['FRA', '#4472C4', 'France']].forEach(function(o) {
     var t = ts[o[0]]; if (!t) return;
     var vs = years.map(function(y) { return t[y]; }).filter(function(v) { return typeof v === 'number'; });
     if (vs.length < 2) return;
@@ -1821,7 +1834,7 @@ function svgEvoAude(m) {
     }
   });
   series.forEach(function(sr, i) {
-    var lx = PL + i * 100, ly = H - 12;
+    var lx = PL + i * Math.floor((W - PL - PR) / series.length), ly = H - 12;
     out += '<line x1="' + lx + '" y1="' + ly + '" x2="' + (lx + 16) + '" y2="' + ly + '" stroke="' + sr.col + '" stroke-width="' + (sr.dash ? 1.4 : 2.6) + '"' + (sr.dash ? ' stroke-dasharray="4,3"' : '') + '/><text x="' + (lx + 20) + '" y="' + (ly + 3) + '" font-size="8" fill="#444">' + sr.lbl + '</text>';
   });
   return out + '</svg>';
@@ -1842,8 +1855,8 @@ function svgMiniMap(m, geo) {
   function classOf(v) { var c = 0; while (c < breaks.length && v >= breaks[c]) c++; return c; }
   function getColor(v) { return (typeof v !== 'number' || isNaN(v)) ? '#e5e9f0' : palette[classOf(v)]; }
 
-  var W = 300, H = 260;
-  var lonMin = -5.3, lonMax = 9.8, latMin = 41.2, latMax = 51.2;
+  var H = 260, lonMin = -5.3, lonMax = 9.8, latMin = 41.2, latMax = 51.2;
+  var W = Math.round(H * (lonMax - lonMin) * Math.cos(46.2 * Math.PI / 180) / (latMax - latMin));
   function proj(lon, lat) { return [(lon - lonMin) / (lonMax - lonMin) * W, H - (lat - latMin) / (latMax - latMin) * H]; }
   function rings2path(rings) {
     return rings.map(function(ring) {
@@ -2088,22 +2101,27 @@ async function loadCAF() {
         return out;
       }
       var selAvg = 'dtreffre,' + okKeys.map(function(k) { return 'avg(' + k + ') as a_' + k; }).join(',');
-      var occWhere = OCC.map(function(c) { return 'numdep="' + c + '"'; }).concat(['numdep="9"']).join(' OR ');
+      function cafWhere(codes) { var parts = []; codes.forEach(function(c) { parts.push('numdep="' + c + '"'); if (/^0\d$/.test(c)) parts.push('numdep="' + c.slice(1) + '"'); }); return parts.join(' OR '); }
+      var occWhere = cafWhere(OCC), strWhere = cafWhere(STRATE);
+      var fraWhere = cafWhere(Object.keys(DREES_DEPTS).filter(function(c) { return c !== '6AE'; })); // France métropolitaine uniquement (ni DROM ni totaux)
       var reqs = [
         fetch(cafBase + '?limit=100&order_by=' + encodeURIComponent('dtreffre DESC') + '&where=' + encodeURIComponent('numdep="11"')),
-        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg)),
-        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg) + '&where=' + encodeURIComponent(occWhere))
+        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg) + '&where=' + encodeURIComponent(fraWhere)),
+        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg) + '&where=' + encodeURIComponent(occWhere)),
+        fetch(cafBase + '?limit=100&group_by=dtreffre&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent(selAvg) + '&where=' + encodeURIComponent(strWhere))
       ];
       var resp = await Promise.all(reqs);
       var rowsA = resp[0].ok ? (await resp[0].json()).results || [] : [];
       var rowsF = resp[1].ok ? (await resp[1].json()).results || [] : [];
       var rowsO = resp[2].ok ? (await resp[2].json()).results || [] : [];
+      var rowsS = resp[3].ok ? (await resp[3].json()).results || [] : [];
       var nTs = 0;
       okKeys.forEach(function(k) {
         if (setTs('caf_' + k, '11', annualOf(rowsA, function(rr) { return rr[k]; }))) {
           nTs++;
           setTs('caf_' + k, 'FRA', annualOf(rowsF, function(rr) { return rr['a_' + k]; }));
           setTs('caf_' + k, 'OCC', annualOf(rowsO, function(rr) { return rr['a_' + k]; }));
+          setTs('caf_' + k, 'STR', annualOf(rowsS, function(rr) { return rr['a_' + k]; }));
         }
       });
       addLog(nTs ? 'ℹ️' : '⚠️', 'CAF : évolution annuelle chargée pour ' + nTs + ' indicateurs (HTTP ' + resp.map(function(x) { return x.status; }).join('/') + ').');
@@ -2380,7 +2398,7 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
     } else { DREES_SNAP[id] = { '11': ln.v * sc }; }
     // évolution : Aude (une valeur par année) + moyennes France / Occitanie si le comparatif existe
     if (yearField) {
-      var sA = {}, sF = {}, sO = {};
+      var sA = {}, sF = {}, sO = {}, sS = {};
       rows11.forEach(function(rr) { var v = rr[f.name]; if (typeof v === 'number' && sA[String(rr[yearField])] === undefined) sA[String(rr[yearField])] = v * sc; });
       Object.keys(natByYear).forEach(function(y) {
         var mp0 = natByYear[y][f.name]; if (!mp0) return;
@@ -2388,8 +2406,9 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
         var all = statsAndRankFor(mp, null), oc = statsAndRankFor(mp, OCC);
         if (all.total >= 20) sF[y] = all.stats.mean;
         if (oc.total) sO[y] = oc.stats.mean;
+        var stS = statsAndRankFor(mp, STRATE); if (stS.total >= 8) sS[y] = stS.stats.mean;
       });
-      if (setTs(id, '11', sA)) { entry.has_ts = true; setTs(id, 'FRA', sF); setTs(id, 'OCC', sO); }
+      if (setTs(id, '11', sA)) { entry.has_ts = true; setTs(id, 'FRA', sF); setTs(id, 'OCC', sO); setTs(id, 'STR', sS); }
     }
     CNSA_META.push(entry);
     n++;
@@ -2496,12 +2515,13 @@ async function loadINSEE() {
     addLog('⚠️', 'INSEE (' + ds + ') : comparatif départemental indisponible (' + lastErr + ') — valeur Aude seule.');
     return null;
   }
+  var curSource = 'INSEE — API Melodi (direct)';
   function put(id, label, unit, fmtName, aude, period, desc, themes, snap) {
     var existing = INSEE_META.find(function(m) { return m.id === id; });
     var e = existing || { id: id, label: label, unit: unit, fmt: fmtName, themes: themes,
       occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
       total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false, desc: desc };
-    e.aude = aude; e.annee = period; e.source = 'INSEE — API Melodi (direct)'; e.isNew = !existing;
+    e.aude = aude; e.annee = period; e.source = curSource; e.isNew = !existing;
     if (!existing) INSEE_META.push(e);
     var txt = '';
     if (snap && Object.keys(snap).length >= 20) {
@@ -2547,6 +2567,97 @@ async function loadINSEE() {
       } catch (eP) { /* période ignorée pour le comparatif */ }
     }
     addLog('ℹ️', 'INSEE (' + ds1 + ') : ' + periodsA.length + ' millésime(s) pour l\'Aude (' + periodsA.join(', ') + ') ; comparatif départemental obtenu pour ' + nbNatOk + '/' + wantP.length + ' période(s).');
+
+    // ---- Série ANNUELLE 2020-2025 : estimations de population au 1er janvier (jeu DS_ESTIMATION_POPULATION) ----
+    // Le recensement (jeu ci-dessus) ne fournit que quelques millésimes isolés ; les estimations annuelles donnent une vraie courbe.
+    var fromEstimates = false;
+    try {
+      var dsE = 'DS_ESTIMATION_POPULATION';
+      var obsE = await audeObs(dsE);
+      var dimsE = Object.keys(obsE[0].dimensions || {}).map(function(k) { return k + '=' + Array.from(new Set(obsE.map(function(o) { return dim(o, k); }))).slice(0, 8).join('/'); });
+      addLog('ℹ️', 'INSEE (' + dsE + ') : ' + obsE.length + ' observations pour l\'Aude, dimensions → ' + dimsE.join(' ; '));
+      var ageDim = 'AGE';
+      if (!(obsE[0].dimensions || {}).AGE) {
+        Object.keys(obsE[0].dimensions || {}).forEach(function(k) { if (obsE.some(function(o) { return /^Y(_(LT|GE))?\d/.test(String(dim(o, k))); })) ageDim = k; });
+      }
+      var yearOf = function(o) { return String(dim(o, 'TIME_PERIOD')).slice(0, 4); };
+      var tpOf = {};
+      obsE.forEach(function(o) { tpOf[yearOf(o)] = String(dim(o, 'TIME_PERIOD')); });
+      var yearsE = Object.keys(tpOf).filter(function(y) { return +y >= 2020 && +y <= 2025; }).sort();
+      var rawE = {};
+      function addE(list, onlyY) {
+        var pool = reduceTotals(list, [ageDim]), acc = {};
+        var sexVals = Array.from(new Set(pool.map(function(o) { return dim(o, 'SEX'); })));
+        var sumSex = sexVals.length > 1 && sexVals.indexOf('_T') < 0 && sexVals.indexOf('F') >= 0 && sexVals.indexOf('M') >= 0;
+        pool.forEach(function(o) {
+          var y = yearOf(o), c = depCode(o), v = val(o), a = dim(o, ageDim);
+          if (!c || v === null || a == null || yearsE.indexOf(y) < 0 || (onlyY && y !== onlyY)) return;
+          var cell = ((acc[y] = acc[y] || {})[c] = acc[y][c] || {});
+          // si plusieurs mesures coexistent (effectifs / pourcentages), l'effectif est toujours la plus grande valeur
+          cell[a] = sumSex ? (cell[a] || 0) + v : Math.max(cell[a] === undefined ? -Infinity : cell[a], v);
+        });
+        Object.keys(acc).forEach(function(y) { Object.keys(acc[y]).forEach(function(c) { (rawE[y] = rawE[y] || {})[c] = acc[y][c]; }); });
+      }
+      addE(obsE);
+      var nbNatE = 0;
+      for (var ye = 0; ye < yearsE.length; ye++) {
+        try {
+          var oE = await allDeps(dsE, obsE, [ageDim], '&TIME_PERIOD=' + tpOf[yearsE[ye]]);
+          if (oE) { addE(oE, yearsE[ye]); nbNatE++; }
+        } catch (eE1) { /* année ignorée pour le comparatif */ }
+      }
+      // Tranches d'âge : « Y_LT20 », « Y20T64 », « Y_GE65 »… ; les âges quinquennaux sont additionnés si besoin
+      function parseAge(code) {
+        var mm;
+        if ((mm = /^Y_LT(\d+)$/.exec(code))) return [0, +mm[1] - 1];
+        if ((mm = /^Y_GE(\d+)$/.exec(code))) return [+mm[1], 200];
+        if ((mm = /^Y(\d+)T(\d+)$/.exec(code))) return [+mm[1], +mm[2]];
+        if ((mm = /^Y(\d+)$/.exec(code))) return [+mm[1], +mm[1]];
+        return null;
+      }
+      function sumRange(cell, lo, hi) {
+        var cl = [];
+        Object.keys(cell).forEach(function(code) { var r = parseAge(code); if (r && r[0] >= lo && r[1] <= hi) cl.push({ lo: r[0], hi: r[1], v: cell[code] }); });
+        cl.sort(function(a, b) { return (a.hi - a.lo) - (b.hi - b.lo) || a.lo - b.lo; });
+        var chosen = [];
+        cl.forEach(function(c) { if (!chosen.some(function(x) { return c.lo <= x.hi && c.hi >= x.lo; })) chosen.push(c); });
+        chosen.sort(function(a, b) { return a.lo - b.lo; });
+        var pos = lo, tot = 0;
+        for (var i = 0; i < chosen.length; i++) { if (chosen[i].lo !== pos) return null; tot += chosen[i].v; pos = chosen[i].hi + 1; }
+        return (hi >= 200 ? pos > 90 : pos === hi + 1) ? tot : null;
+      }
+      function deriveStd(cell) {
+        var out = {}, tot = cell._T !== undefined ? cell._T : sumRange(cell, 0, 200);
+        if (tot == null) return null;
+        out._T = tot;
+        [['Y_GE65', 65, 200], ['Y_GE80', 80, 200], ['Y_LT20', 0, 19], ['Y_LT15', 0, 14], ['Y20T64', 20, 64]].forEach(function(sd) {
+          var v = cell[sd[0]] !== undefined ? cell[sd[0]] : sumRange(cell, sd[1], sd[2]);
+          if (v != null) out[sd[0]] = v;
+        });
+        Object.keys(cell).forEach(function(k) { // grandes classes propres au jeu (ex. moins de 25 ans, 25-59 ans, 60 ans et plus, 75 ans et plus)
+          var r = parseAge(k);
+          if (k !== '_T' && out[k] === undefined && r && ((r[1] >= 200 && r[0] <= 80) || (r[1] < 200 && r[1] - r[0] + 1 >= 15)) && !(cell[k] < 1000 && tot > 10000)) out[k] = cell[k];
+        });
+        return out;
+      }
+      var byPE = {}, nbOk11 = 0;
+      Object.keys(rawE).sort().forEach(function(y) {
+        Object.keys(rawE[y]).forEach(function(c) {
+          var d = deriveStd(rawE[y][c]);
+          if (d) { (byPE[y] = byPE[y] || {})[c] = d; }
+        });
+        if (byPE[y] && byPE[y]['11'] && byPE[y]['11'].Y_GE65 != null) nbOk11++;
+      });
+      if (nbOk11 >= 3) {
+        byP = byPE; period = Object.keys(byPE).filter(function(y) { return byPE[y]['11']; }).sort().pop();
+        fromEstimates = true; curSource = 'INSEE — Estimations de population au 1er janvier (API Melodi)';
+        addLog('ℹ️', 'INSEE : démographie calculée à partir des estimations annuelles de population — années ' + Object.keys(byPE).filter(function(y) { return byPE[y]['11']; }).sort().join(', ') + ' ; comparatif départemental obtenu pour ' + nbNatE + '/' + yearsE.length + ' année(s).');
+      } else {
+        addLog('⚠️', 'INSEE (' + dsE + ') : tranches d\'âge non reconnues (' + nbOk11 + ' année(s) exploitable(s)) — recensement conservé (millésimes isolés).');
+      }
+    } catch (eEst) {
+      addLog('⚠️', 'INSEE (estimations de population) : ' + eEst.message + ' — recensement conservé (millésimes isolés).');
+    }
     var defs = [
       ['insee_pop',    'Population totale',            'hab.', 'int',  function(d) { return d._T; },                                      'Population du département (recensement, INSEE).', ['demographie']],
       ['insee_p65',    'Part des 65 ans et plus',      '%',    'pct1', function(d) { return d._T && d.Y_GE65 != null ? d.Y_GE65 / d._T * 100 : null; }, 'Part des 65 ans et plus dans la population (recensement INSEE).', ['demographie', 'ages']],
@@ -2556,6 +2667,7 @@ async function loadINSEE() {
       ['insee_a2064',  'Part des 20-64 ans',           '%',    'pct1', function(d) { return d._T && d.Y20T64 != null ? d.Y20T64 / d._T * 100 : null; }, 'Part des 20-64 ans dans la population (recensement INSEE).', ['demographie']],
       ['insee_ivieil', 'Indice de vieillissement',     '',     'dec1', function(d) { return d.Y_GE65 != null && d.Y_LT20 ? d.Y_GE65 / d.Y_LT20 * 100 : null; }, 'Nombre de 65 ans et plus pour 100 jeunes de moins de 20 ans.', ['demographie', 'ages']]
     ];
+    if (fromEstimates) defs.forEach(function(df) { df[5] = df[5].replace(/\(recensement INSEE\)|\(recensement de la population, INSEE\)/, '(estimation de population au 1er janvier, INSEE ; les années récentes sont provisoires)').replace('(recensement, INSEE)', '(estimation au 1er janvier, INSEE ; les années récentes sont provisoires)'); });
     // Tranches d'âge supplémentaires présentes dans les données : part dans la population totale
     var knownAge = { _T: 1, Y_GE65: 1, Y_GE80: 1, Y_LT20: 1, Y_LT15: 1, Y20T64: 1 }, ageSeen = {};
     Object.keys(byP).forEach(function(pe) { Object.keys(byP[pe]).forEach(function(c) { Object.keys(byP[pe][c]).forEach(function(a) { ageSeen[a] = 1; }); }); });
@@ -2572,11 +2684,11 @@ async function loadINSEE() {
       var al = ageLabel(code), lbl = al ? 'Part des ' + al : 'Part de la tranche d\'âge « ' + code + ' »';
       defs.push(['insee_age_' + code.toLowerCase(), lbl, '%', 'pct1',
         function(d) { return d._T && d[code] != null ? d[code] / d._T * 100 : null; },
-        lbl + ' dans la population du département : effectif de la tranche rapporté à la population totale (recensement de la population, INSEE).', ['demographie']]);
+        lbl + ' dans la population du département : effectif de la tranche rapporté à la population totale (' + (fromEstimates ? 'estimation de population au 1er janvier, INSEE ; les années récentes sont provisoires' : 'recensement de la population, INSEE') + ').', ['demographie']]);
     });
     function meanOf(arr) { return arr.reduce(function(a, b) { return a + b; }, 0) / arr.length; }
     defs.forEach(function(df) {
-      var snap = {}, sAude = {}, sFra = {}, sOcc = {};
+      var snap = {}, sAude = {}, sFra = {}, sOcc = {}, sStr = {};
       Object.keys(byP).sort().forEach(function(pe) {
         var snapP = {};
         Object.keys(byP[pe]).forEach(function(c) { var v = df[4](byP[pe][c]); if (v !== null && v !== undefined && !isNaN(v)) snapP[c] = v; });
@@ -2585,17 +2697,20 @@ async function loadINSEE() {
         if (allV.length >= 20) sFra[pe] = meanOf(allV);
         var occV = OCC.map(function(c) { return cleanP[c]; }).filter(function(v) { return v !== undefined; });
         if (occV.length) sOcc[pe] = meanOf(occV);
+        var strV = STRATE.map(function(c) { return cleanP[c]; }).filter(function(v) { return v !== undefined; });
+        if (strV.length >= 8) sStr[pe] = meanOf(strV);
         if (pe === period) snap = snapP;
       });
       if (snap['11'] === undefined) { addLog('⚠️', 'INSEE : ' + df[1] + ' non calculable (tranches d\'âge absentes).'); return; }
       put(df[0], df[1], df[2], df[3], snap['11'], period, df[5], df[6], snap);
-      if (setTs(df[0], '11', sAude)) { setTs(df[0], 'FRA', sFra); setTs(df[0], 'OCC', sOcc); }
+      if (setTs(df[0], '11', sAude)) { setTs(df[0], 'FRA', sFra); setTs(df[0], 'OCC', sOcc); setTs(df[0], 'STR', sStr); }
     });
   } catch (e) {
     addLog('⚠️', 'INSEE (population par âge) : ' + e.message + '. Aucun chiffre affiché plutôt qu\'un chiffre non sourcé.');
   }
 
   // ---------- 2) Pauvreté et niveau de vie médian (Filosofi) ----------
+  curSource = 'INSEE — API Melodi (direct)';
   try {
     var ds2 = 'DS_FILOSOFI_CC';
     var obsF = await audeObs(ds2);
@@ -2878,13 +2993,14 @@ async function fetchDreesSeriesStats(dsKey, deptField, labelField, yearField, ex
     if (isNaN(x)) return;
     (byY[y] = byY[y] || {})[dc] = x;
   });
-  var fra = {}, occ = {};
+  var fra = {}, occ = {}, str = {};
   Object.keys(byY).forEach(function(y) {
-    var f = statsAndRankFor(byY[y], null), o = statsAndRankFor(byY[y], OCC);
+    var f = statsAndRankFor(byY[y], null), o = statsAndRankFor(byY[y], OCC), st = statsAndRankFor(byY[y], STRATE);
     if (f.total >= 20) fra[y] = f.stats.mean;
     if (o.total) occ[y] = o.stats.mean;
+    if (st.total >= 8) str[y] = st.stats.mean;
   });
-  return { FRA: fra, OCC: occ };
+  return { FRA: fra, OCC: occ, STR: str };
 }
 async function fetchDreesAgg(dsKey, labelField, yearField, exact, extraWhere, scale) {
   var where = labelField + '="' + exact + '"' + (extraWhere || '');
@@ -3113,7 +3229,13 @@ async function loadDREES() {
       if (!existing) DREES_META.push(entry);
       var serie = {};
       rowsG.forEach(function(rr) { var y = j.yf ? rr[j.yf] : null; if (y != null && serie[y] === undefined) serie[y] = num(rr.value) * scale; });
-      if (setTs(id, '11', serie)) entry.has_ts = true;
+      if (setTs(id, '11', serie)) {
+        entry.has_ts = true;
+        try {
+          var srA = await fetchDreesSeriesStats(j.ds, j.df, j.lf, j.yf, lab, arec.code_isd, scale, (typeof annee === 'number') ? annee - 9 : null);
+          setTs(id, 'FRA', srA.FRA); setTs(id, 'OCC', srA.OCC); setTs(id, 'STR', srA.STR);
+        } catch (eSr) { /* série de l'Aude seule */ }
+      }
       if (snap && Object.keys(snap).length > 1) {
         var sm = {}; Object.keys(snap).forEach(function(k) { sm[k] = snap[k] * scale; });
         DREES_SNAP[id] = sm;
@@ -3136,8 +3258,8 @@ async function loadDREES() {
       jobs.push(async function() {
         try {
           var ser = await fetchDreesSeriesStats(t.rule.ds, t.deptField, t.labelField, t.yearField, t.exactLabel, t.codeIsd, t.rule.scale, t.minYear);
-          var okF = setTs(t.rule.id, 'FRA', ser.FRA), okO = setTs(t.rule.id, 'OCC', ser.OCC);
-          if (okF || okO) tsOk++;
+          var okF = setTs(t.rule.id, 'FRA', ser.FRA), okO = setTs(t.rule.id, 'OCC', ser.OCC), okS = setTs(t.rule.id, 'STR', ser.STR);
+          if (okF || okO || okS) tsOk++;
         } catch (e) { tsErr = tsErr || e.message; }
       });
     });
