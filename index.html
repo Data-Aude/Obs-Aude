@@ -294,6 +294,172 @@ var geoCache         = null;
 var newCount         = 0;
 
 // Définition affichée (info-bulle, fenêtre de détail, PDF) : jamais vide.
+
+// ===== Sigles en toutes lettres + définitions rédigées par indicateur =====
+var ACR = { RSA: 'revenu de solidarité active', APA: 'allocation personnalisée d\'autonomie', PCH: 'prestation de compensation du handicap',
+  ACTP: 'allocation compensatrice pour tierce personne', ASE: 'aide sociale à l\'enfance', AED: 'action éducative à domicile',
+  AEMO: 'action éducative en milieu ouvert', ASH: 'aide sociale à l\'hébergement', AAH: 'allocation aux adultes handicapés',
+  AEEH: 'allocation d\'éducation de l\'enfant handicapé', AJPA: 'allocation journalière du proche aidant',
+  AJPP: 'allocation journalière de présence parentale', APL: 'aide personnalisée au logement', ALF: 'allocation de logement familiale',
+  ALS: 'allocation de logement sociale', AF: 'allocations familiales', CF: 'complément familial', ASF: 'allocation de soutien familial',
+  PPA: 'prime d\'activité', PAJE: 'prestation d\'accueil du jeune enfant', PreParE: 'prestation partagée d\'éducation de l\'enfant',
+  MDPH: 'maison départementale des personnes handicapées', EHPAD: 'établissement d\'hébergement pour personnes âgées dépendantes', AVP: 'aide à la vie partagée',
+  EHPA: 'établissement d\'hébergement pour personnes âgées', USLD: 'unité de soins de longue durée',
+  SAAD: 'service d\'aide et d\'accompagnement à domicile', SSIAD: 'service de soins infirmiers à domicile',
+  SPASAD: 'service polyvalent d\'aide et de soins à domicile', ESMS: 'établissements et services sociaux et médico-sociaux',
+  ESAT: 'établissement et service d\'accompagnement par le travail', FAM: 'foyer d\'accueil médicalisé', MAS: 'maison d\'accueil spécialisée',
+  SESSAD: 'service d\'éducation spéciale et de soins à domicile', IME: 'institut médico-éducatif', ITEP: 'institut thérapeutique, éducatif et pédagogique',
+  CAMSP: 'centre d\'action médico-sociale précoce', CMPP: 'centre médico-psycho-pédagogique', SAVS: 'service d\'accompagnement à la vie sociale',
+  SAMSAH: 'service d\'accompagnement médico-social pour adultes handicapés', GIR: 'groupe iso-ressources, échelle de perte d\'autonomie de 1 (la plus forte) à 6',
+  FIR: 'fonds d\'intervention régional', OGD: 'objectif global de dépenses', CPOM: 'contrat pluriannuel d\'objectifs et de moyens',
+  CFPPA: 'conférence des financeurs de la prévention de la perte d\'autonomie', ISD: 'indicateurs sociaux départementaux',
+  CNSA: 'Caisse nationale de solidarité pour l\'autonomie', DREES: 'direction de la recherche, des études, de l\'évaluation et des statistiques',
+  INSEE: 'Institut national de la statistique et des études économiques', CAF: 'caisse d\'allocations familiales', UC: 'unité de consommation',
+  PA: 'personnes âgées', PH: 'personnes en situation de handicap', EAJE: 'établissement d\'accueil du jeune enfant' };
+var ACR_CAF = { ARS: 'allocation de rentrée scolaire', CMG: 'complément de libre choix du mode de garde', PN: 'prime à la naissance', AB: 'allocation de base' };
+var ACR_ADM = { ARS: 'agence régionale de santé' };
+// Écrit chaque sigle en toutes lettres à sa première occurrence : « revenu de solidarité active (RSA) ». Idempotent.
+function expandAcr(text, source) {
+  if (!text) return text;
+  var ctx = /CAF/.test(String(source || '')) ? ACR_CAF : ACR_ADM, done = {};
+  return String(text).replace(/(\()?\b([A-Z][A-Za-z0-9]{1,7})\b(\))?/g, function(all, op, tok, cl) {
+    if (op && cl) { done[tok] = 1; return all; }
+    var full = ACR[tok] || ctx[tok];
+    if (!full || done[tok]) return all;
+    done[tok] = 1;
+    if (String(text).toLowerCase().indexOf(full.toLowerCase().split(',')[0]) >= 0) return all; // forme longue déjà présente
+    return (op || '') + full + ' (' + tok + ')' + (cl || '');
+  });
+}
+function lowerFirst(t) { return t ? t.charAt(0).toLowerCase() + t.slice(1) : t; }
+// Définition propre à CET indicateur : nature de la mesure, périmètre, unité, source. Les sigles sont développés.
+function buildDefinition(m) {
+  var Ls = String(m.label || '').replace(/\s+—\s+personnes (âgées|handicapées)\s*$/i, '').replace(/\s+/g, ' ').trim();
+  Ls = Ls.replace(/\b(ash|gir|ars|fir|ogd|camsp|cmpp|sessad|savs|samsah|itep|ehpad|esms|mdph|apa|pch|rsa|aah)\b/g, function(x) { return x.toUpperCase(); });
+  var t = normFrCnsa(Ls), tech = String(m.techName || '').toLowerCase(), src = String(m.source || '').split(' — ')[0].split(' (')[0], out = [];
+  var unitPct = m.unit === '%' || m.fmt === 'pct1', main;
+  var head = Ls.charAt(0).toUpperCase() + Ls.slice(1); if (!/[.!?]$/.test(head)) head += '.';
+  var cur = null;
+  if (/CNSA/.test(String(m.source || ''))) { for (var ci = 0; ci < CNSA_DEFS.length; ci++) if (CNSA_DEFS[ci][0].test(tech)) { cur = CNSA_DEFS[ci][1]; break; } }
+  if (cur) {
+    main = cur;
+  } else if (m.descOfficial) {
+    main = m.descOfficial.replace(/\s+$/, ''); if (!/[.!?]$/.test(main)) main += '.';
+    head = null;
+  } else if (/^indfoy/.test(tech)) main = 'Nombre de foyers allocataires concernés dans le département au dernier mois publié (un foyer = un allocataire, son conjoint éventuel et les personnes à sa charge).';
+  else if (/^indnbp/.test(tech)) main = 'Nombre de personnes couvertes (allocataires, conjoints, enfants et autres personnes à charge) dans le département.';
+  else if (/^indmtt/.test(tech)) main = 'Montant total, en euros, versé au cours du mois aux allocataires du département.';
+  else if (/^taux d.?equipement/.test(t)) main = 'Taux d\'équipement : nombre de places d\'accueil disponibles rapporté à la population concernée (en général pour 1 000 personnes de la tranche d\'âge visée).';
+  else if (/^part /.test(t)) main = 'Il s\'agit d\'une part : proportion de la catégorie citée dans l\'ensemble de référence indiqué dans l\'intitulé, exprimée en pourcentage.';
+  else if (/^taux /.test(t)) main = 'Il s\'agit d\'un taux : nombre de personnes (ou de situations) concernées rapporté à la population de référence indiquée dans l\'intitulé' + (unitPct ? ', exprimé en pourcentage.' : '.');
+  else if (/^(nombre|nb )/.test(t) && /places/.test(t)) main = 'Capacité d\'accueil : nombre de places disponibles dans le département.';
+  else if (/^(nombre|nb |effectif)/.test(t)) main = 'Effectif : nombre recensé dans le département.';
+  else if (/prix moyen|tarif/.test(t)) main = 'Prix moyen exprimé en euros' + (/pondere/.test(t) ? ', calculé comme une moyenne pondérée (chaque établissement compte proportionnellement à son nombre de places).' : '.');
+  else if (/^(montant|total|credits?|programmation|financement|concours|dotation)/.test(t)) main = 'Somme d\'argent exprimée en euros.';
+  else if (/^depenses?/.test(t)) main = 'Dépenses du Département.';
+  else main = 'Indicateur publié par ' + (src || 'la source') + ' pour le département.';
+  if (head) out.push(head);
+  out.push(main);
+  if (!m.descOfficial && !cur) {
+    if (/\bbrut/.test(t)) out.push('Montants bruts : avant déduction des recouvrements, récupérations et remboursements.');
+    else if (/\bnet/.test(t) && /depense|cout|montant/.test(t)) out.push('Montants nets : après déduction des recouvrements et récupérations.');
+    if (/par habitant/.test(t)) out.push('Rapporté à la population du département (montant par habitant).');
+    if (/par beneficiaire/.test(t)) out.push('Rapporté au nombre de bénéficiaires (montant moyen par bénéficiaire).');
+    if (/pour 1 ?000\b|pour mille/.test(t)) out.push('Rapporté à 1 000 habitants de la population concernée.');
+    if (/pour 100 ?000/.test(t)) out.push('Rapporté à 100 000 habitants de la population concernée.');
+    if (/0.?20 ans/.test(t)) out.push('Population de référence : les 0-20 ans du département.');
+    else if (/0.?17 ans|moins de 18 ans/.test(t)) out.push('Population de référence : les moins de 18 ans du département.');
+    if (/\bnon ash\b/i.test(Ls)) out.push('« non ASH » : établissements non habilités à l\'aide sociale à l\'hébergement (tarifs libres).');
+    else if (/\bash\b/i.test(Ls)) out.push('« ASH » : établissements habilités à recevoir des bénéficiaires de l\'aide sociale à l\'hébergement (tarifs encadrés par le Département).');
+  }
+  var ut = m.fmt === 'pct1' ? 'pourcentage' : (m.fmt === 'eur0' ? 'euros' : (m.fmt === 'keur' ? 'millions d\'euros' : (m.unit ? m.unit : 'nombre')));
+  out.push('Unité : ' + ut + '.');
+  out.push('Source : ' + (src || 'non précisée') + (m.dsTitle ? ', jeu « ' + m.dsTitle + ' »' : '') + (m.annee ? ' — millésime ' + m.annee : '') + '.');
+  return expandAcr(out.join(' '), m.source);
+}
+
+// Définitions par famille d'indicateurs CNSA (jeu « indicateurs clés de l'offre médico-sociale », financement, habitat inclusif…)
+var CNSA_DEFS = [
+  [/taux_equip_etab_ph_adultes/, 'Niveau d\'équipement en établissements pour adultes en situation de handicap : nombre de places installées en établissements (hébergement, accueil de jour…) rapporté à la population adulte du département, en général pour 1 000 adultes de 20 à 59 ans. Plus le taux est élevé, plus l\'offre en établissements est importante.'],
+  [/taux_equip_serv_ph_adultes/, 'Niveau d\'équipement en services pour adultes en situation de handicap (accompagnement à domicile ou en milieu ordinaire, par exemple SAVS et SAMSAH) : nombre de places en services rapporté à la population adulte du département, en général pour 1 000 adultes de 20 à 59 ans.'],
+  [/taux_equip_hors_camsp_cmpp_e/, 'Niveau d\'équipement pour les enfants en situation de handicap, hors CAMSP et CMPP (structures de consultation sans places installées) : nombre de places en établissements et services rapporté à la population de moins de 20 ans, en général pour 1 000 enfants.'],
+  [/taux_service_e/, 'Niveau d\'équipement en services pour enfants en situation de handicap (par exemple SESSAD) : nombre de places en services rapporté à la population de moins de 20 ans, en général pour 1 000 enfants.'],
+  [/nb_etab_places_ph_a/, 'Nombre de places installées dans les établissements médico-sociaux pour adultes en situation de handicap du département (hébergement, accueil de jour…, selon le périmètre retenu par la CNSA).'],
+  [/nb_etab_places_ph_e/, 'Nombre de places installées dans les établissements médico-sociaux pour enfants en situation de handicap du département (par exemple IME et ITEP).'],
+  [/nb_services_places_ph_a/, 'Nombre de places dans les services d\'accompagnement pour adultes en situation de handicap du département (par exemple SAVS et SAMSAH).'],
+  [/nb_services_places_ph_e/, 'Nombre de places dans les services pour enfants en situation de handicap du département (par exemple SESSAD).'],
+  [/part_0_19/, 'Part des enfants et jeunes de 0 à 19 ans dans la population du département : mesure le poids de la jeunesse, qui détermine les besoins en structures pour enfants.'],
+  [/part_20_59/, 'Part des adultes de 20 à 59 ans dans la population du département : population de référence pour les besoins d\'accompagnement des adultes en situation de handicap.'],
+  [/part_plus_60ans/, 'Part des personnes de 60 ans et plus dans la population du département : indicateur de vieillissement, lié aux besoins d\'accompagnement de la perte d\'autonomie.'],
+  [/part_plus_75ans/, 'Part des personnes de 75 ans et plus dans la population du département : indicateur de grand âge, âge où la perte d\'autonomie devient la plus fréquente.'],
+  [/part_enfants_limitation_severe/, 'Part estimée des enfants ayant une limitation sévère dans leurs activités habituelles : indicateur du besoin potentiel d\'accompagnement des enfants en situation de handicap.'],
+  [/part_adultes_limitation_severe/, 'Part estimée des adultes ayant une limitation sévère dans leurs activités habituelles : indicateur du besoin potentiel d\'accompagnement des adultes en situation de handicap.'],
+  [/part_pers_mdph/, 'Part de la population du département ayant au moins un droit ouvert auprès de la maison départementale des personnes handicapées (MDPH).'],
+  [/prix_moyen_pondere_ehpad_non_ash/, 'Prix moyen de l\'hébergement, en euros par jour, dans les EHPAD non habilités à l\'aide sociale (tarif libre) du département, pondéré par le nombre de places de chaque établissement.'],
+  [/prix_moyen_pondere_ehpad_ash/, 'Prix moyen de l\'hébergement, en euros par jour, dans les EHPAD habilités à l\'aide sociale à l\'hébergement du département (tarif encadré par le Département), pondéré par le nombre de places de chaque établissement.'],
+  [/programmation_credits_pa/, 'Crédits programmés pour l\'offre médico-sociale destinée aux personnes âgées du département (création, transformation ou modernisation de places), en euros.'],
+  [/programmation_credits_ph/, 'Crédits programmés pour l\'offre médico-sociale destinée aux personnes en situation de handicap du département (création, transformation ou modernisation de places), en euros.'],
+  [/total_montant_a_verser/, 'Total, en euros, des montants à verser au Département par la CNSA au titre de l\'article 43 après notification définitive.'],
+  [/montant_definitif/, 'Montant définitif, en euros, notifié par la CNSA au Département au titre de l\'article 43 pour l\'année indiquée dans le libellé.'],
+  [/montant_concours_pa_article_43/, 'Concours versé par la CNSA au Département au titre de l\'article 43, pour le volet personnes âgées, en euros.'],
+  [/consolidation_des_depenses_fir_pa/, 'Dépenses du fonds d\'intervention régional (FIR) consacrées aux personnes âgées dans le département, en euros.'],
+  [/total_tarife_pa_ogd/, 'Total des dépenses tarifées pour les personnes âgées dans le cadre de l\'objectif global de dépenses (OGD), en euros.'],
+  [/_nb_hi$/, 'Nombre d\'habitats inclusifs bénéficiant de l\'aide à la vie partagée (AVP) dans le département.'],
+  [/dont_nombre_de_pa/, 'Dont habitats inclusifs destinés aux personnes âgées, parmi ceux bénéficiant de l\'aide à la vie partagée (AVP).'],
+  [/dont_nombre_de_ph/, 'Dont habitats inclusifs destinés aux personnes en situation de handicap, parmi ceux bénéficiant de l\'aide à la vie partagée (AVP).']
+];
+
+// Titres lisibles par famille de champs CNSA (quand le libellé de l'API est le nom technique du champ)
+var CNSA_TITLES = [
+  [/taux_equip_etab_ph_adultes/, 'Taux d\'équipement en établissements pour adultes en situation de handicap'],
+  [/taux_equip_serv_ph_adultes/, 'Taux d\'équipement en services pour adultes en situation de handicap'],
+  [/taux_equip_hors_camsp_cmpp_e/, 'Taux d\'équipement pour enfants en situation de handicap (hors CAMSP et CMPP)'],
+  [/taux_service_e/, 'Taux d\'équipement en services pour enfants en situation de handicap'],
+  [/nb_etab_places_ph_a/, 'Places en établissements pour adultes en situation de handicap'],
+  [/nb_etab_places_ph_e/, 'Places en établissements pour enfants en situation de handicap'],
+  [/nb_services_places_ph_a/, 'Places en services pour adultes en situation de handicap'],
+  [/nb_services_places_ph_e/, 'Places en services pour enfants en situation de handicap'],
+  [/part_0_19/, 'Part des 0-19 ans dans la population'],
+  [/part_20_59/, 'Part des 20-59 ans dans la population'],
+  [/part_plus_60ans/, 'Part des 60 ans et plus dans la population'],
+  [/part_plus_75ans/, 'Part des 75 ans et plus dans la population'],
+  [/part_enfants_limitation_severe/, 'Part des enfants avec une limitation sévère d\'activité'],
+  [/part_adultes_limitation_severe/, 'Part des adultes avec une limitation sévère d\'activité'],
+  [/part_pers_mdph/, 'Part de la population ayant des droits ouverts à la MDPH'],
+  [/prix_moyen_pondere_ehpad_non_ash/, 'Prix moyen d\'hébergement en EHPAD non habilités à l\'aide sociale'],
+  [/prix_moyen_pondere_ehpad_ash/, 'Prix moyen d\'hébergement en EHPAD habilités à l\'aide sociale'],
+  [/programmation_credits_pa/, 'Crédits programmés pour l\'offre destinée aux personnes âgées'],
+  [/programmation_credits_ph/, 'Crédits programmés pour l\'offre destinée aux personnes en situation de handicap'],
+  [/total_montant_a_verser/, 'Article 43 : total des montants à verser'],
+  [/montant_concours_pa_article_43/, 'Concours article 43 : personnes âgées'],
+  [/consolidation_des_depenses_fir_pa/, 'Fonds d\'intervention régional (FIR) : personnes âgées'],
+  [/total_tarife_pa_ogd/, 'Dépenses tarifées pour les personnes âgées (objectif global de dépenses)'],
+  [/_nb_hi$/, 'Habitats inclusifs financés par l\'aide à la vie partagée'],
+  [/dont_nombre_de_pa/, 'Habitats inclusifs pour personnes âgées (aide à la vie partagée)'],
+  [/dont_nombre_de_ph/, 'Habitats inclusifs pour personnes en situation de handicap (aide à la vie partagée)']
+];
+function cnsaTitleFor(fieldName) {
+  var f = String(fieldName).toLowerCase(), my = f.match(/montant_definitif_(\d{4})/);
+  if (my) return 'Article 43 : montant définitif notifié pour ' + my[1];
+  for (var i = 0; i < CNSA_TITLES.length; i++) if (CNSA_TITLES[i][0].test(f)) return CNSA_TITLES[i][1];
+  return null;
+}
+var FIN_RE = /depense|cout|financ|budget|recette|montant|credit|tarif|prix|dotation|subvention|epargne|dette|fiscal|concours|versement|verse|€|euro|\bfir\b|\bogd\b/;
+// Passe finale sur chaque indicateur : définition rédigée + thème « Financier » réservé aux vrais indicateurs financiers
+function normalizeMeta(m) {
+  if (m.descAuto) m.desc = buildDefinition(m); else if (m.desc) m.desc = expandAcr(m.desc, m.source);
+  if (m.themes && m.themes.indexOf('financier') >= 0) {
+    var financial = m.unit === '€' || m.fmt === 'eur0' || m.fmt === 'keur' || FIN_RE.test(normFrCnsa(m.label));
+    if (!financial) {
+      m.themes = m.themes.filter(function(x) { return x !== 'financier'; });
+      if (!m.themes.length) {
+        var tl = normFrCnsa(m.label);
+        m.themes.push(/enfan|ase\b|jeunesse|placement/.test(tl) ? 'ase' : (/agee|apa\b|ehpad|dependance/.test(tl) ? 'ages' : (/handic|pch|mdph|aah/.test(tl) ? 'handicap' : 'social')));
+      }
+    }
+  }
+}
+
 function defOf(m) {
   if (m.desc) return m.desc;
   var src = m.source ? String(m.source).split(' — ')[0] : '';
@@ -368,11 +534,139 @@ function showTab(id, btn) {
 
 // ---- Indicateurs masqués ----
 // Liste PERMANENTE (dans le code) : ajoutez ici les identifiants à ne jamais afficher, ex. ['drees_financiers_1abc', 'caf_indrsa'].
-var HIDDEN_INDICATORS = [];
+var HIDDEN_INDICATORS = [
+  // Libellés illisibles (masqués à la demande)
+  "insee_f_s_dir_tax_di",
+  "insee_f_s_ei_di_une",
+  "insee_f_s_soc_ben_di_fam_ben",
+  "insee_f_d4_sl",
+  "insee_f_d7_sl",
+  "insee_f_s_soc_ben_di",
+  "insee_f_iqr_sl",
+  "insee_f_d3_sl",
+  "insee_f_ir_d9_d1_sl",
+  "insee_f_d1_sl",
+  "insee_f_d9_sl",
+  "insee_f_s_soc_ben_di_hou_ben",
+  "insee_f_q3_sl",
+  "insee_f_gi_sl",
+  "insee_f_s_inc_ass_di",
+  "insee_f_q1_sl",
+  "insee_f_s80s20_sl",
+  "insee_f_s_ei_di",
+  "insee_f_d2_sl",
+  "insee_f_s_ei_di_sal",
+  "insee_f_d6_sl",
+  "insee_f_d8_sl",
+  "insee_f_s_ei_di_n_sal",
+  "insee_f_s_ret_pen_di",
+  "insee_f_s_soc_ben_di_min_soc",
+  "cnsa_art-43_notification-definitive_montant_definitif_2022",
+  "cnsa_art-43_notification-definitive_montant_definitif_2021",
+  "cnsa_art-43_notification-definitive_total_montant_a_verser",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_a_etab_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_e_etab_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_e_etab_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_a_etab_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_a_serv_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_a_serv_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_e_serv_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_ph_e_serv_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_pa_ehpad_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_pa_ehpad_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_pa_ehpad_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_pa_ehpad_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_e_serv_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_e_serv_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_prix_moyen_pondere_ehpad_non_ash",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_a_etab_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_a_serv_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_a_serv_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_0_19",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_20_59",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_plus_60ans",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_plus_75ans",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_enfants_limitation_severe",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_adultes_limitation_severe",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_part_pers_mdph",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_prix_moyen_pondere_ehpad_ash",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_20_59",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_0_19",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_taux_service_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_nb_services_places_ph_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_montant_ars_esms_limit",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_montant_ars_esms_gir",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_programmation_credits_pa",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_programmation_credits_ph",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_plus_60ans",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_nb_services_places_ph_a",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_taux_equip_serv_ph_adultes",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_nb_etab_places_ph_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_taux_equip_hors_camsp_cmpp_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_taux_service_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_nb_services_places_ph_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_prix_moyen_pondere_ehpad_ash",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_programmation_credits_pa",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_programmation_credits_ph",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_e_etab_part_top_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_a_etab_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_ph_e_etab_part_bottom_20",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_adultes_limitation_severe",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_enfants_limitation_severe",
+  "cnsa_bdd_consolidation_des_depenses_fir_pa",
+  "cnsa_bdd_consolidation_des_depenses_montant_concours_pa_article_43",
+  "cnsa_bdd_consolidation_des_depenses_total_tarife_pa_ogd",
+  "cnsa_2024_tableau_suivi_deploiement_synthese_avp_cl_022025_nb_hi",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_montant_ars_esms_limit",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_montant_ars_esms_gir",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_nb_etab_places_ph_a",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_taux_equip_etab_ph_adultes",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_pers_mdph",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_nb_services_places_ph_a",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_taux_equip_serv_ph_adultes",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_taux_equip_etab_ph_adultes",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_nb_etab_places_ph_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_nb_etab_places_ph_a",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_taux_equip_hors_camsp_cmpp_e",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_departementale_part_plus_75ans",
+  "cnsa_2024_tableau_suivi_deploiement_synthese_avp_cl_022025_dont_nombre_de_pa",
+  "cnsa_2024_tableau_suivi_deploiement_synthese_avp_cl_022025_dont_nombre_de_ph",
+  "cnsa_indicateurs_cles_offre_medico_sociale_echelle_regionale_prix_moyen_pondere_ehpad_non_ash",
+  "caf_indfoy_pn",
+  "caf_indmtt_ndurpaje",
+  "caf_indnbp_ndurpaje",
+  "caf_indfoy_ndurpaje",
+  "caf_indnbp_pn",
+  "caf_indmtt_pn",
+  "caf_indfoy_ab",
+  "caf_indnbp_ab",
+  "caf_indmtt_ab",
+  "caf_indfoy_cmg",
+  "caf_indnbp_cmg",
+  "caf_indmtt_cmg",
+  "caf_indfoy_prepare",
+  "caf_indnbp_prepare",
+  "caf_indnbp_ndur",
+  "caf_indmtt_ndur",
+  "caf_indmtt_prepare",
+  "caf_indfoy_ndurej",
+  "caf_indnbp_ndurej",
+  "caf_indmtt_ndurej",
+  "caf_indnbp_af",
+  "caf_indnbp_cf",
+  "caf_indmtt_cf",
+  "caf_indfoy_ndur",
+  "caf_indmtt_ndurint",
+  "caf_indnbp_ndurint",
+  "caf_indfoy_ndurint",
+  "caf_indfoy_cf"
+];
 // Liste PERSONNELLE : bouton « Masquer » dans la fiche d'un indicateur, mémorisée par le navigateur.
 var HIDDEN_LOCAL = [];
 try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem('obs_aude_hidden') || '[]') || []; } catch (eLs) { HIDDEN_LOCAL = []; }
 var HIDDEN_METAS = [];
+var ZERO_METAS = []; // indicateurs retirés automatiquement car la valeur de l'Aude est 0
+function isZeroAude(m) { return typeof m.aude === 'number' && Math.abs(m.aude) < 1e-12; }
 function isHiddenInd(id) { return HIDDEN_INDICATORS.indexOf(id) >= 0 || HIDDEN_LOCAL.indexOf(id) >= 0; }
 function saveHidden() { try { localStorage.setItem('obs_aude_hidden', JSON.stringify(HIDDEN_LOCAL)); } catch (eLs) {} }
 function refreshAllViews() {
@@ -407,13 +701,17 @@ function copyHiddenIds() {
 }
 function openHiddenPanel() {
   var h = '<h3>Indicateurs masqués</h3><div class="modal-meta">Ils n\'apparaissent plus dans le tableau de bord, les classements, la carte, l\'évolution ni le PDF.</div>';
-  if (!HIDDEN_METAS.length) h += '<p style="color:#889;font-size:12px;margin:14px 0">Aucun indicateur masqué.</p>';
+  if (!HIDDEN_METAS.length) h += '<p style="color:#889;font-size:12px;margin:14px 0">Aucun indicateur masqué manuellement.</p>';
   HIDDEN_METAS.forEach(function(m) {
     var perm = HIDDEN_INDICATORS.indexOf(m.id) >= 0;
     h += '<div class="modal-rank-row"><span style="flex:1;margin-right:8px">' + m.label + '<br><span style="font-size:9px;color:#99a">' + m.id + '</span></span>' +
       (perm ? '<span style="font-size:10px;color:#889">masqué dans le code</span>' : '<button class="theme-btn" data-ind-id="' + m.id + '" onclick="unhideInd(this.dataset.indId)">Rétablir</button>') + '</div>';
   });
   if (HIDDEN_LOCAL.length) h += '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"><button class="theme-btn" onclick="unhideAll()">Tout rétablir</button><button class="theme-btn" onclick="copyHiddenIds()">Copier la liste (pour la rendre permanente)</button></div>';
+  if (ZERO_METAS.length) {
+    h += '<h4 style="margin:18px 0 6px;color:#1a4a6e;font-size:12px">Retirés automatiquement : valeur de l\'Aude égale à 0 (' + ZERO_METAS.length + ')</h4>';
+    ZERO_METAS.forEach(function(m) { h += '<div class="modal-rank-row"><span style="flex:1">' + m.label + '<br><span style="font-size:9px;color:#99a">' + m.id + '</span></span></div>'; });
+  }
   document.getElementById('modal-content').innerHTML = h;
   document.getElementById('modal-overlay').classList.add('on');
 }
@@ -443,6 +741,9 @@ function rebuildAllMeta() {
   // Retrait des indicateurs masqués
   HIDDEN_METAS = ALL_META.filter(function(m) { return isHiddenInd(m.id); });
   if (HIDDEN_METAS.length) ALL_META = ALL_META.filter(function(m) { return !isHiddenInd(m.id); });
+  ZERO_METAS = ALL_META.filter(isZeroAude);
+  if (ZERO_METAS.length) ALL_META = ALL_META.filter(function(m) { return !isZeroAude(m); });
+  ALL_META.forEach(normalizeMeta);
   var hb = document.getElementById('hidden-btn'); if (hb) hb.textContent = '🚫 Masqués (' + HIDDEN_METAS.length + ')';
 
   if (typeof DREES_SNAP !== 'undefined') {
@@ -668,7 +969,7 @@ function openModal(indId) {
   }
   
   function statsBlock(title, sf) {
-    if (!sf || !sf.mean) return '';
+    if (!sf || !sf.n) return '';
     return '<div class="modal-section"><h4>'+title+'</h4><div class="modal-grid">' +
       '<div class="modal-stat-box"><div class="modal-stat-val">'+fmtShort(sf.mean,m.fmt)+' '+m.unit+'</div><div class="modal-stat-lbl">Moyenne</div></div>' +
       '<div class="modal-stat-box"><div class="modal-stat-val">'+fmtShort(sf.median,m.fmt)+' '+m.unit+'</div><div class="modal-stat-lbl">Médiane</div></div>' +
@@ -678,9 +979,9 @@ function openModal(indId) {
       '<div class="modal-stat-box"><div class="modal-stat-val">'+sf.n+'</div><div class="modal-stat-lbl">Depts</div></div>' +
       '</div></div>';
   }
-  if (m.stats_strate && m.stats_strate.mean) html += statsBlock('Statistiques — Strate', m.stats_strate);
-  if (m.stats_occ && m.stats_occ.mean) html += statsBlock('Statistiques — Occitanie', m.stats_occ);
-  if (m.stats_fr && m.stats_fr.mean) html += statsBlock('Statistiques — France métropolitaine', m.stats_fr);
+  if (m.stats_strate && m.stats_strate.n) html += statsBlock('Statistiques — Strate', m.stats_strate);
+  if (m.stats_occ && m.stats_occ.n) html += statsBlock('Statistiques — Occitanie', m.stats_occ);
+  if (m.stats_fr && m.stats_fr.n) html += statsBlock('Statistiques — France métropolitaine', m.stats_fr);
   
   html += '<div style="margin-top:14px;padding-top:10px;border-top:1px solid #e1e5ea"><button class="theme-btn" data-ind-id="' + m.id + '" onclick="hideInd(this.dataset.indId)">🚫 Masquer cet indicateur</button> <span style="font-size:9px;color:#99a">id : ' + m.id + '</span></div>';
   document.getElementById('modal-content').innerHTML = html;
@@ -822,7 +1123,7 @@ function renderRankTable() {
     if (m.rank_strate) rankHtml += '<span class="rank-badge '+rankClass(m.rank_strate,m.total_strate)+'">Strate '+m.rank_strate+'/'+m.total_strate+'</span>';
     
     var stHtml = '';
-    if (m.stats_strate && m.stats_strate.mean) {
+    if (m.stats_strate && m.stats_strate.n) {
       var sf = m.stats_strate;
       stHtml = '<tr><td colspan="5" style="padding:8px 12px;background:#f4f5f7;font-size:11px;color:#595959">' +
         '<strong>Strate ('+m.total_strate+' dép.) :</strong> Moy. '+fmtShort(sf.mean,m.fmt)+' '+m.unit +
@@ -1220,7 +1521,8 @@ function colorMap() {
   var wrap = document.getElementById('map-svg-wrap');
   if (!wrap || !wrap.querySelector('svg')) return;
 
-  var vals = Object.keys(snap).map(function(k){ return snap[k]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
+  var snapC = cleanDeptMap(snap);
+  var vals = Object.keys(snapC).map(function(k){ return snapC[k]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
   if (vals.length < 2) {
     var legElNa = document.getElementById('legend-items');
     if (legElNa) legElNa.innerHTML = '<div style="color:#888;padding:4px 0">Comparaison départementale non disponible pour cet indicateur.</div>';
@@ -1530,7 +1832,8 @@ function svgEvoAude(m) {
 function svgMiniMap(m, geo) {
   var snap = DREES_SNAP[m.id];
   if (!snap || !geo) return null;
-  var vals = Object.keys(snap).map(function(k){ return snap[k]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
+  var snapC = cleanDeptMap(snap);
+  var vals = Object.keys(snapC).map(function(k){ return snapC[k]; }).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
   if (vals.length < 2) return null;
   vals.sort(function(a,b){ return a-b; });
   var palette = ['#e8f1fb','#b7d3ee','#79aede','#3b7fc4','#0f4c8a'];
@@ -1718,23 +2021,15 @@ async function loadCAF() {
         if (/aah|aeeh|ajpp|handi/.test(kn)) th = ['handicap']; else if (/ajpa|aidant|senior|vieil/.test(kn)) th = ['ages'];
         if (money) th.push('financier');
         CAF_FIELDS.push({ key: k, auto: true,
-          label: (function() { var l = cafSchema[k] && stripHtml(cafSchema[k].label); return (l && !/^[a-z0-9_]+$/.test(l)) ? l : prettyName(l || k); })(),
+          label: (function() {
+            var l = cafSchema[k] && stripHtml(cafSchema[k].label);
+            if (l && !/^[a-z0-9_]+$/.test(l)) return l;
+            var fam = /^indfoy/.test(kn) ? 'Foyers allocataires' : (/^indnbp/.test(kn) ? 'Personnes couvertes' : (/^indmtt/.test(kn) ? 'Montant versé' : null));
+            var restK = kn.replace(/^ind(foy|nbp|mtt)_?/, ''), restU = restK.toUpperCase();
+            return (fam && restK) ? fam + ' — ' + ((ACR[restU] || ACR_CAF[restU]) ? restU : prettyName(restK)) : prettyName(l || k);
+          })(),
           fmt: money ? 'eur0' : (Number.isInteger(rec[k]) ? 'int' : 'dec1'), unit: money ? '€' : '', themes: th,
-          def: (function() {
-            var sd = cafSchema[k] && stripHtml(cafSchema[k].description); if (sd) return sd;
-            var lbl = (cafSchema[k] && stripHtml(cafSchema[k].label)) || prettyName(k), out = [];
-            if (/^ind?foy|foy/.test(kn)) out.push('Nombre de foyers allocataires concernés dans le département.');
-            else if (/^ind?ben|ben/.test(kn)) out.push('Nombre de bénéficiaires dans le département.');
-            else if (money) out.push('Montant total versé dans le mois aux allocataires du département.');
-            else out.push('Donnée mensuelle publiée par la CAF pour le département (« ' + lbl + ' »).');
-            var CAFG = { RSA: 'revenu de solidarité active', AAH: 'allocation aux adultes handicapés', AEEH: 'allocation d\'éducation de l\'enfant handicapé',
-              AJPA: 'allocation journalière du proche aidant', AJPP: 'allocation journalière de présence parentale', APL: 'aide personnalisée au logement',
-              ALF: 'allocation de logement familiale', ALS: 'allocation de logement sociale', AF: 'allocations familiales', CF: 'complément familial',
-              ARS: 'allocation de rentrée scolaire', ASF: 'allocation de soutien familial', PPA: 'prime d\'activité', PAJE: 'prestation d\'accueil du jeune enfant' };
-            var sg = []; (kn.split(/[_\s]+/)).forEach(function(w) { var u = w.toUpperCase(); if (CAFG[u]) sg.push(u + ' = ' + CAFG[u]); });
-            if (sg.length) out.push('Sigle : ' + sg.join(' ; ') + '.');
-            return out.join(' ');
-          })() });
+          def: stripHtml(cafSchema[k] && cafSchema[k].description) });
         nbAutoCaf++;
       });
       if (nbAutoCaf) addLog('ℹ️', 'CAF : ' + nbAutoCaf + ' indicateur(s) supplémentaire(s) détecté(s) automatiquement.');
@@ -1759,7 +2054,8 @@ async function loadCAF() {
         has_ts: false,
         source: 'CAF — données mensuelles',
         annee: dateRef,
-        desc: (CAF_DEFS[f.key] || (f.auto ? f.def : 'Donnée mensuelle CAF.')) + ' Valeur du dernier mois publié (' + dateRef + ').',
+        desc: f.auto ? '' : ((CAF_DEFS[f.key] || 'Donnée mensuelle CAF.') + ' Valeur du dernier mois publié (' + dateRef + ').'),
+        descAuto: !!f.auto, descOfficial: f.auto ? f.def : '', techName: f.key,
         isNew: isNew && prevIds.length > 0
       };
 
@@ -1905,7 +2201,7 @@ function deptCodeOf(v) {
     Object.keys(alias).forEach(function(k) { if (!DEPT_NAME2CODE[k]) DEPT_NAME2CODE[k] = alias[k]; });
   }
   var str = String(v).trim().toUpperCase();
-  var m = str.match(/^0*(2[AB]|\d{1,3})(?=\D|$)/);
+  var m = str.match(/^0*(2[AB]|\d{1,3})(?=[\s\-–:(,]|$)/);
   if (m) { var c = m[1]; return c.length === 1 ? '0' + c : c; }
   var nm = normFrCnsa(str).replace(/^departement (de la |de l'|du |des |de |d')?/, '').replace(/[^a-z0-9]/g, '');
   return DEPT_NAME2CODE[nm] || null;
@@ -2031,21 +2327,34 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
     if (skip[f.name] || excludePattern.test(normFrCnsa(f.name))) return;
     var ln = latestNum(f); if (!ln) return;
     // Nom lisible : libellé officiel s'il est en clair, sinon nom technique « traduit » ; contexte PA / PH ajouté si absent
-    var rawLbl = stripHtml(f.label || '');
-    var human = rawLbl && !/^[a-z0-9_]+$/.test(rawLbl) ? rawLbl : prettyName(rawLbl || f.name);
+    var rawLbl = stripHtml(f.label || ''), curTitle = cnsaTitleFor(f.name);
+    var human = curTitle || (rawLbl && !/^[a-z0-9_\-]+$/.test(rawLbl) ? rawLbl : prettyName((rawLbl || f.name).replace(/^(echelle[_ ]departementale|echelle[_ ]regionale)[_ ]?/i, '')));
     human = human.charAt(0).toUpperCase() + human.slice(1);
-    var nl0 = normFrCnsa(human), idn = normFrCnsa(dsId);
-    if (/(^|_)pa(_|$)/.test(idn) && !/personnes agees|\bpa\b/.test(nl0)) human += ' — personnes âgées';
-    else if (/(^|_)ph(_|$)/.test(idn) && !/personnes handicapees|\bph\b|handicap/.test(nl0)) human += ' — personnes handicapées';
+    if (!curTitle) { // contexte du public ajouté seulement si le jeu en vise UN SEUL (PA ou PH) et que le libellé ne le dit pas
+      var nl0 = normFrCnsa(human), idn = normFrCnsa(dsId);
+      var dsPA = /(^|[_\-])pa([_\-]|$)/.test(idn), dsPH = /(^|[_\-])ph([_\-]|$)/.test(idn);
+      if (dsPA && !dsPH && !/personnes agees|\bpa\b/.test(nl0)) human += ' — personnes âgées';
+      else if (dsPH && !dsPA && !/personnes handicapees|\bph\b|handicap/.test(nl0)) human += ' — personnes handicapées';
+    }
     var nameNorm = normFrCnsa(f.name + ' ' + (f.label || ''));
-    var fmtName = /taux|pct|couverture|part_|pourcentage/.test(nameNorm) ? 'pct1' : (/depense|montant|cout|euro|eur\b/.test(nameNorm) ? 'eur0' : 'dec1');
+    if (/regional/.test(nameNorm)) return; // même valeur pour tous les départements d'une région : comparaison départementale sans sens
+    var fmtName = /taux_equip|taux_service|equipement/.test(nameNorm) ? 'dec1' : (/taux|pct|couverture|part_|pourcentage/.test(nameNorm) ? 'pct1' : (/depense|montant|cout|euro|eur\b|prix|tarif|credit|programmation|concours|fir\b|ogd/.test(nameNorm) ? 'eur0' : 'dec1'));
     var id = 'cnsa_' + dsId + '_' + f.name;
     var isNew = prevIds.indexOf(id) < 0;
     if (isNew && prevIds.length > 0) newCount++;
-    var th = ['financier'], tx = normFrCnsa(dsId + ' ' + (f.label || f.name));
-    if (/(^|[^a-z])pa([^a-z]|$)|personnes.?agees|apa|ehpad|senior/.test(tx)) th.push('ages');
-    if (/(^|[^a-z])ph([^a-z]|$)|handicap|pch|mdph|aah/.test(tx)) th.push('handicap');
-    if (th.length === 1) th = ['financier', 'ages', 'handicap'];
+    // Thème d'après le SENS de l'indicateur (et non plus « Financier » par défaut pour tous)
+    var th = [], tx = normFrCnsa(f.name + ' ' + (f.label || '') + ' ' + human);
+    var isMoney = /montant|credit|depense|financ|tarif|prix|budget|concours|dotation|cout|subvention|\beuro|\beur\b|€|\bfir\b|\bogd\b|article.?43|notification/.test(tx);
+    if (/part.?(0.?19|20.?59|plus.?60|plus.?75)|plus.?(60|75).?ans|population/.test(tx)) th.push('demographie');
+    if (/plus.?(60|75).?ans|(^|[^a-z])pa([^a-z]|$)|personnes.?agees|apa|ehpad|senior|gir\b/.test(tx)) th.push('ages');
+    if (/(^|[^a-z])ph([^a-z]|$)|handicap|pch|mdph|limitation|camsp|cmpp|aah|sessad|\bime\b|habitat.?inclusif|_hi\b/.test(tx)) th.push('handicap');
+    if (!th.length || (th.length === 1 && th[0] === 'demographie')) { // contexte du jeu en dernier recours
+      var cx = normFrCnsa(dsId), cPA = /(^|[_\-])pa([_\-]|$)/.test(cx), cPH = /(^|[_\-])ph([_\-]|$)/.test(cx);
+      if (cPA) th.push('ages');
+      if (cPH) th.push('handicap');
+    }
+    if (isMoney) th.unshift('financier');
+    if (!th.length) th = ['ages', 'handicap'];
     var sc = 1;
     if (fmtName === 'pct1') { // taux stockés en proportion (0,52) → pourcentage (52 %)
       var mxa = 0; allRows.forEach(function(rr) { var vv = rr[f.name]; if (typeof vv === 'number') mxa = Math.max(mxa, Math.abs(vv)); });
@@ -2057,7 +2366,7 @@ async function cnsaLoadDataset(dsId, info, prevIds) {
       aude: ln.v * sc, occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null,
       total_fr: 96, total_strate: 11, total_occ: 13, stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false,
       source: 'CNSA — Data Autonomie', annee: ln.y,
-      desc: (stripHtml(f.description) || (human + '.')) + ' Indicateur issu du jeu CNSA « ' + (stripHtml(info.title) || dsId) + ' »' + (info.description ? ' : ' + stripHtml(info.description).slice(0, 260) + (stripHtml(info.description).length > 260 ? '…' : '') : '.') + ' (champ source : ' + f.name + ').',
+      desc: '', descAuto: true, descOfficial: stripHtml(f.description), techName: f.name, dsTitle: stripHtml(info.title) || dsId,
       isNew: isNew && prevIds.length > 0
     };
     var snapMap = (natByYear[yearField ? String(ln.y) : '_'] || {})[f.name];
@@ -2272,9 +2581,9 @@ async function loadINSEE() {
         var snapP = {};
         Object.keys(byP[pe]).forEach(function(c) { var v = df[4](byP[pe][c]); if (v !== null && v !== undefined && !isNaN(v)) snapP[c] = v; });
         if (snapP['11'] !== undefined) sAude[pe] = snapP['11'];
-        var allV = Object.keys(snapP).map(function(c) { return snapP[c]; });
+        var cleanP = cleanDeptMap(snapP), allV = Object.keys(cleanP).map(function(c) { return cleanP[c]; });
         if (allV.length >= 20) sFra[pe] = meanOf(allV);
-        var occV = OCC.map(function(c) { return snapP[c]; }).filter(function(v) { return v !== undefined; });
+        var occV = OCC.map(function(c) { return cleanP[c]; }).filter(function(v) { return v !== undefined; });
         if (occV.length) sOcc[pe] = meanOf(occV);
         if (pe === period) snap = snapP;
       });
@@ -2555,6 +2864,28 @@ async function runPool(tasks, n) {
   await Promise.all(Array.from({ length: n }, worker));
 }
 // Moyenne annuelle d'un indicateur DREES (France ou Occitanie) calculée côté serveur (group_by)
+// Moyennes France métropolitaine / Occitanie PAR ANNÉE, calculées sur les valeurs départementales (comme le tableau de statistiques)
+async function fetchDreesSeriesStats(dsKey, deptField, labelField, yearField, exactLabel, codeIsd, scale, minYear) {
+  var where = codeIsd ? 'code_isd="' + codeIsd + '"' : labelField + '="' + String(exactLabel).replace(/"/g, '\\"') + '"';
+  if (yearField && typeof minYear === 'number') where += ' AND ' + yearField + '>=' + minYear;
+  var rows = await fetchDreesPages(dsKey, where, 14);
+  if (labelField && exactLabel) rows = rows.filter(function(rr) { return fuseFr(rr[labelField] || '') === fuseFr(exactLabel); });
+  var byY = {};
+  rows.forEach(function(rr) {
+    var y = yearField ? rr[yearField] : null, dc = deptCodeOf(rr[deptField]), v = rr.value;
+    if (y == null || dc === null || v === null || v === undefined || v === '') return;
+    var x = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (scale || 1);
+    if (isNaN(x)) return;
+    (byY[y] = byY[y] || {})[dc] = x;
+  });
+  var fra = {}, occ = {};
+  Object.keys(byY).forEach(function(y) {
+    var f = statsAndRankFor(byY[y], null), o = statsAndRankFor(byY[y], OCC);
+    if (f.total >= 20) fra[y] = f.stats.mean;
+    if (o.total) occ[y] = o.stats.mean;
+  });
+  return { FRA: fra, OCC: occ };
+}
 async function fetchDreesAgg(dsKey, labelField, yearField, exact, extraWhere, scale) {
   var where = labelField + '="' + exact + '"' + (extraWhere || '');
   var url = DREES_BASE + DREES_RESOLVED_ID[dsKey] + '/records?select=' + encodeURIComponent(yearField + ', avg(value) as moy') +
@@ -2575,17 +2906,33 @@ function computeStats(vals) {
   function q(p) { var pos = (n - 1) * p, b = Math.floor(pos), r = pos - b; return s[b + 1] !== undefined ? s[b] + r * (s[b + 1] - s[b]) : s[b]; }
   return { n: n, mean: s.reduce(function(a, b) { return a + b; }, 0) / n, median: q(0.5), q1: q(0.25), q3: q(0.75) };
 }
-// Classe les départements d'un snap {dept: valeur} (rang 1 = valeur la plus haute), filtré
-// optionnellement sur une liste de codes (Occitanie / Strate), et calcule les stats associées.
+// Ne garde que les départements de France métropolitaine, chacun UNE seule fois :
+//  - codes 01…95, 2A, 2B (hors DROM, totaux, régions, libellés non reconnus) ;
+//  - 69D (Rhône) est ramené à 69 ; 69M (Métropole de Lyon) est écartée pour ne pas compter Lyon deux fois ;
+//  - 6AE (Collectivité européenne d'Alsace) n'est conservée que si 67 et 68 sont absents (sinon l'Alsace compterait 3 fois).
+function cleanDeptMap(map) {
+  var out = {};
+  Object.keys(map || {}).forEach(function(k) {
+    var c = String(k).toUpperCase();
+    if (c === '69D') c = '69';
+    if (c === '69M' || c === '6AE') return;
+    if (!/^(0[1-9]|[1-8]\d|9[0-5]|2A|2B)$/.test(c) || c === '20') return;
+    out[c] = map[k];
+  });
+  if (map && map['6AE'] !== undefined && out['67'] === undefined && out['68'] === undefined) out['6AE'] = map['6AE'];
+  return out;
+}
+// Classe les départements d'un snap {dept: valeur} (rang 1 = valeur la plus haute ; ex æquo = même rang),
+// filtré sur une liste de codes (Occitanie / Strate) ou sur la France métropolitaine, et calcule les stats.
 function statsAndRankFor(snapMap, deptFilter) {
-  var entries = Object.keys(snapMap)
+  var clean = cleanDeptMap(snapMap);
+  var entries = Object.keys(clean)
     .filter(function(d) { return !deptFilter || deptFilter.indexOf(d) >= 0; })
-    .map(function(d) { return { dept: d, val: snapMap[d] }; })
+    .map(function(d) { return { dept: d, val: clean[d] }; })
     .filter(function(e) { return typeof e.val === 'number' && !isNaN(e.val); });
   if (!entries.length) return { stats: { n: 0 }, rank: null, total: 0 };
-  var sorted = entries.slice().sort(function(a, b) { return b.val - a.val; });
-  var rank = null;
-  sorted.forEach(function(e, i) { if (e.dept === '11') rank = i + 1; });
+  var rank = null, audeE = entries.find(function(e) { return e.dept === '11'; });
+  if (audeE) rank = 1 + entries.filter(function(e) { return e.val > audeE.val; }).length;
   return { stats: computeStats(entries.map(function(e) { return e.val; })), rank: rank, total: entries.length };
 }
 
@@ -2683,7 +3030,7 @@ async function loadDREES() {
       if (y == null || audeSeries[y] !== undefined || v === null || v === undefined || v === '') return;
       audeSeries[y] = (typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v) * (rule.scale || 1);
     });
-    if (setTs(rule.id, '11', audeSeries)) { entry.has_ts = true; tsTasks.push({ rule: rule, labelField: labelField, yearField: yearField }); }
+    if (setTs(rule.id, '11', audeSeries)) { entry.has_ts = true; tsTasks.push({ rule: rule, labelField: labelField, yearField: yearField, deptField: deptField, exactLabel: rec[labelField], codeIsd: rec.code_isd, minYear: (typeof annee === 'number') ? annee - 9 : null }); }
 
     var codeIsd = rec.code_isd;
     var snapMap = codeIsd ? await fetchDreesComparatif(rule.ds, deptField, codeIsd, yearField, annee, rule.scale, labelField, rule.exact) : null;
@@ -2733,7 +3080,7 @@ async function loadDREES() {
       if (/enfan|ase\b|jeunesse|mineur|placement|aemo|aed\b|adoption|protection de l/.test(t)) th.push('ase');
       if (/agee|apa\b|dependance|senior|vieill/.test(t)) th.push('ages');
       if (/handic|pch\b|aah\b|mdph/.test(t)) th.push('handicap');
-      if (/depense|cout|financ|budget|recette|montant|epargne|dette|fiscal|charge/.test(t) || dsKey2 === 'financiers' || dsKey2 === 'depenses') th.push('financier');
+      if (/depense|cout|financ|budget|recette|montant|epargne|dette|fiscal|\bcharges\b|€|euro/.test(t)) th.unshift('financier');
       if (!th.length) th.push(dsKey2 === 'enfance' ? 'ase' : 'social');
       return th;
     }
@@ -2761,7 +3108,7 @@ async function loadDREES() {
       entry.unit = unit; entry.fmt = fmtName; entry.themes = dreesThemes(lab, j.ds);
       entry.aude = raw * scale; entry.annee = annee;
       entry.source = 'DREES — data.drees (détecté automatiquement, indicateur: ' + lab + ')';
-      entry.desc = dreesDefinition(lab, j.ds, unit);
+      entry.desc = ''; entry.descAuto = true; entry.dsTitle = dreesDsTitle(j.ds);
       entry.isNew = isNew;
       if (!existing) DREES_META.push(entry);
       var serie = {};
@@ -2786,17 +3133,16 @@ async function loadDREES() {
   if (tsTasks.length) {
     var tsErr = null, tsOk = 0, jobs = [];
     tsTasks.forEach(function(t) {
-      [['FRA', ''], ['OCC', ' AND lib_reg="Occitanie"']].forEach(function(cfg) {
-        jobs.push(async function() {
-          try {
-            var ser = await fetchDreesAgg(t.rule.ds, t.labelField, t.yearField, t.rule.exact, cfg[1], t.rule.scale);
-            if (setTs(t.rule.id, cfg[0], ser)) tsOk++;
-          } catch (e) { tsErr = tsErr || e.message; }
-        });
+      jobs.push(async function() {
+        try {
+          var ser = await fetchDreesSeriesStats(t.rule.ds, t.deptField, t.labelField, t.yearField, t.exactLabel, t.codeIsd, t.rule.scale, t.minYear);
+          var okF = setTs(t.rule.id, 'FRA', ser.FRA), okO = setTs(t.rule.id, 'OCC', ser.OCC);
+          if (okF || okO) tsOk++;
+        } catch (e) { tsErr = tsErr || e.message; }
       });
     });
     await runPool(jobs, 6);
-    addLog(tsOk ? 'ℹ️' : '⚠️', 'DREES : évolution — série de l\'Aude pour ' + tsTasks.length + ' indicateurs ; moyennes France/Occitanie : ' + tsOk + '/' + (tsTasks.length * 2) + (tsErr ? ' (erreur : ' + tsErr + ')' : '') + '.');
+    addLog(tsOk ? 'ℹ️' : '⚠️', 'DREES : évolution — série de l\'Aude pour ' + tsTasks.length + ' indicateurs ; moyennes France/Occitanie calculées pour ' + tsOk + '/' + tsTasks.length + ' indicateurs' + (tsErr ? ' (erreur : ' + tsErr + ')' : '') + '.');
   }
   addLog((updated || autoAdded) ? '✅' : '⚠️', 'DREES : ' + (updated + autoAdded) + ' indicateur(s) chargé(s) (' + updated + '/' + DREES_RULES.length + ' configurés + ' + autoAdded + ' détectés automatiquement).');
 }
