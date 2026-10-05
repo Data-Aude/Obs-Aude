@@ -79,6 +79,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 #classement .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 #classement .theme-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .ind-select-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.copy-img-btn{border:1px solid #c0d8ec;background:#fff;color:#3a7abf;border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.copy-img-btn:hover{background:#eef5fb}
+.rank-title{font-size:18px;font-weight:800;color:#1a2845;line-height:1.25}
+.rank-sub{font-size:11px;color:#6a7a8a;margin-top:3px}
 .ind-btn{text-align:left;white-space:normal;max-width:100%;background:#fff;border:1px solid #c0d8ec;color:#5a7a9a;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
 .ind-btn:hover{background:#e8f2fa;border-color:#8ab0cc}
 .ind-btn.on{background:#4472C4;border-color:#4472C4;color:#fff}
@@ -997,6 +1001,100 @@ function closeModal(e) {
   }
 }
 
+
+// ===== Copie d'un graphique en image (presse-papiers, sinon téléchargement) =====
+function escXml(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function wrapLines(text, maxChars) {
+  var words = String(text || '').split(/\s+/), lines = [], cur = '';
+  words.forEach(function(w) {
+    if ((cur + ' ' + w).trim().length > maxChars && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim();
+  });
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [''];
+}
+function flashBtn(btn, msg) {
+  if (!btn) return;
+  var old = btn.dataset.lbl || btn.innerHTML; btn.dataset.lbl = old;
+  btn.innerHTML = msg;
+  setTimeout(function() { btn.innerHTML = old; }, 2200);
+}
+function downloadBlob(blob, name) {
+  var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function svgToPngBlob(svgStr, w, h) {
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.onload = function() {
+      var k = 2, c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+      var g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(function(b) { b ? resolve(b) : reject(new Error('conversion impossible')); }, 'image/png');
+    };
+    img.onerror = function() { reject(new Error('image illisible')); };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+  });
+}
+// Doit être appelée directement depuis le clic (le presse-papiers exige un geste de l'utilisateur)
+function copySvgAsImage(svgStr, w, h, btn, filename) {
+  var blobP = svgToPngBlob(svgStr, w, h);
+  if (navigator.clipboard && window.ClipboardItem) {
+    try {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blobP })]).then(function() { flashBtn(btn, '✓ Copié'); })
+        .catch(function() { blobP.then(function(b) { downloadBlob(b, filename); flashBtn(btn, '⬇ Téléchargé'); }); });
+      return;
+    } catch (e) { /* repli : téléchargement */ }
+  }
+  blobP.then(function(b) { downloadBlob(b, filename); flashBtn(btn, '⬇ Téléchargé'); }).catch(function() { flashBtn(btn, '✗ Échec'); });
+}
+function exportFooter(W, y, source) {
+  return '<text x="14" y="' + y + '" font-size="9" fill="#8a97a6">' + escXml(source ? 'Source : ' + source : '') + '</text>' +
+    '<text x="' + (W - 14) + '" y="' + y + '" font-size="9" fill="#8a97a6" text-anchor="end">Fait par le Contrôle de Gestion avec ❤️ et un peu d\'IA</text>';
+}
+var lastRankExport = null, lastEvoExport = null;
+
+// Image du classement : titre + barres horizontales (même ordre que le tableau)
+function buildRankSvg(x) {
+  var m = x.m, items = x.items, W = 760, rowH = 17, nameX = 44, barX = 250, barMax = 400;
+  var tl = wrapLines(m.label, 62), headH = 16 + tl.length * 24 + 34;
+  var vals = items.map(function(i) { return i.val; }), mx = Math.max.apply(null, vals), mn = Math.min(0, Math.min.apply(null, vals));
+  var span = (mx - mn) || 1, zeroX = barX + (0 - mn) / span * barMax;
+  var H = headH + items.length * rowH + 40;
+  var out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="Arial, Helvetica, sans-serif"><rect width="' + W + '" height="' + H + '" fill="#fff"/>';
+  tl.forEach(function(ln, i) { out += '<text x="14" y="' + (28 + i * 24) + '" font-size="20" font-weight="700" fill="#1a2845">' + escXml(ln) + '</text>'; });
+  out += '<text x="14" y="' + (28 + (tl.length - 1) * 24 + 20) + '" font-size="11" fill="#6a7a8a">' + escXml(x.sub) + '</text>';
+  items.forEach(function(it, i) {
+    var y = headH + i * rowH, isA = it.code === '11', isS = x.selDept && it.code === x.selDept;
+    if (isA) out += '<rect x="6" y="' + y + '" width="' + (W - 12) + '" height="' + rowH + '" fill="#fff1e6"/>';
+    else if (isS) out += '<rect x="6" y="' + y + '" width="' + (W - 12) + '" height="' + rowH + '" fill="#f1e8fc"/>';
+    var bw = Math.max(1, Math.abs(it.val - 0) / span * barMax), bx = it.val >= 0 ? zeroX : zeroX - bw;
+    out += '<text x="34" y="' + (y + 12) + '" font-size="10" fill="#8a97a6" text-anchor="end">' + (i + 1) + '</text>' +
+      '<text x="' + nameX + '" y="' + (y + 12) + '" font-size="11" fill="#1a2845"' + (isA ? ' font-weight="700"' : '') + '>' + escXml(it.code + ' ' + it.name) + '</text>' +
+      '<rect x="' + bx.toFixed(1) + '" y="' + (y + 3) + '" width="' + bw.toFixed(1) + '" height="' + (rowH - 6) + '" rx="2" fill="' + (isA ? '#ED7D31' : (isS ? '#7a4ad0' : '#8fb0d8')) + '"/>' +
+      '<text x="' + (bx + bw + 6).toFixed(1) + '" y="' + (y + 12) + '" font-size="10" fill="#1a2845"' + (isA ? ' font-weight="700"' : '') + '>' + escXml(fmt(it.val, m.fmt, m.unit)) + '</text>';
+  });
+  out += exportFooter(W, H - 12, x.source) + '</svg>';
+  return { svg: out, W: W, H: H };
+}
+function copyRankImage(btn) {
+  if (!lastRankExport) return;
+  var r = buildRankSvg(lastRankExport), nm = String(lastRankExport.m.label).replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
+  copySvgAsImage(r.svg, r.W, r.H, btn, 'classement_' + nm + '.png');
+}
+// Image de l'évolution : le graphique affiché (titre inclus) + légende
+function copyEvoImage(btn) {
+  if (!lastEvoExport) return;
+  var e = lastEvoExport, legH = 30, H = e.H + legH + 22, out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + e.W + '" height="' + H + '" viewBox="0 0 ' + e.W + ' ' + H + '" font-family="Arial, Helvetica, sans-serif"><rect width="' + e.W + '" height="' + H + '" fill="#fff"/>' + e.inner;
+  var lx = 70;
+  e.legend.forEach(function(it) {
+    out += '<line x1="' + lx + '" y1="' + (e.H + 14) + '" x2="' + (lx + 18) + '" y2="' + (e.H + 14) + '" stroke="' + it.col + '" stroke-width="' + (it.dashed ? 2 : 3) + '"' + (it.dashed ? ' stroke-dasharray="5,3"' : '') + '/>' +
+      '<text x="' + (lx + 24) + '" y="' + (e.H + 18) + '" font-size="11" fill="#333">' + escXml(it.label) + '</text>';
+    lx += 34 + it.label.length * 6.2;
+  });
+  out += exportFooter(e.W, H - 8, e.source) + '</svg>';
+  var nm = String(e.title).replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
+  copySvgAsImage(out, e.W, H, btn, 'evolution_' + nm + '.png');
+}
+
 function buildClassement() {
   var container = document.getElementById('classement');
   var themeHTML = '<div class="theme-bar">';
@@ -1022,6 +1120,8 @@ function buildClassement() {
       '<label style="color:#595959;font-size:12px">Comparer avec :</label>' +
       '<select class="dep-select" id="dept-sel" onchange="setSelectedDept(this.value)">' + deptOptions + '</select>' +
     '</div>' +
+    '<div id="rank-chart-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:8px 0 8px"><div><div class="rank-title" id="rank-chart-title"></div><div class="rank-sub" id="rank-chart-sub"></div></div>' +
+      '<button class="copy-img-btn" id="rank-copy-btn" onclick="copyRankImage(this)" title="Copier le classement en image (capture d\'écran)" style="display:none">📷 Copier en image</button></div>' +
     '<div style="overflow-x:auto"><table id="rank-table"><thead><tr>' +
       '<th style="width:28px">#</th><th>Département</th><th style="width:110px">Valeur</th><th style="min-width:120px">Rang / Jauge</th>' +
     '</tr></thead><tbody id="rank-tbody"></tbody></table></div>';
@@ -1080,8 +1180,13 @@ function setSelectedDept(code) {
   renderRankTable();
 }
 
+function setRankHead(title, sub, canCopy) {
+  var t = document.getElementById('rank-chart-title'), u = document.getElementById('rank-chart-sub'), b = document.getElementById('rank-copy-btn');
+  if (t) t.textContent = title || ''; if (u) u.textContent = sub || ''; if (b) b.style.display = canCopy ? '' : 'none';
+}
 function renderRankTable() {
   var tbody = document.getElementById('rank-tbody');
+  lastRankExport = null; setRankHead('', '', false);
   if (!tbody || !currentIndRank) {
     if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">Sélectionnez un indicateur</td></tr>';
     return;
@@ -1106,6 +1211,11 @@ function renderRankTable() {
     });
     items.sort(function(a,b){return b.val-a.val;});
     var maxVal = items[0] ? items[0].val : 1;
+    var scopeLbl = currentRankScope === 'strate' ? 'Strate (' + items.length + ' départements)' : (currentRankScope === 'occ' ? 'Occitanie (' + items.length + ' départements)' : 'Tous les départements (' + items.length + ')');
+    var srcShort = m.source ? String(m.source).split(' (')[0] : '';
+    var subTxt = 'Classement par ordre décroissant (1 = valeur la plus élevée) · ' + scopeLbl + (m.unit && m.fmt !== 'pct1' && m.fmt !== 'eur0' ? ' · unité : ' + m.unit : '') + (m.annee ? ' · millésime ' + m.annee : '') + (srcShort ? ' · ' + srcShort : '');
+    setRankHead(m.label, subTxt, items.length > 0);
+    lastRankExport = { m: m, items: items, sub: subTxt, source: m.source || '', selDept: selectedDept };
     
     items.forEach(function(item, i) {
       var isAude = item.code === '11';
@@ -1171,7 +1281,7 @@ function buildEvolution() {
       '<label style="color:#595959;font-size:12px">Comparer avec :</label>' +
       '<select class="dep-select" id="evo-dept-sel" onchange="setEvoCompareDept(this.value)">' + deptOptions + '</select>' +
     '</div>' +
-    '<div id="evo-chart"><svg id="evo-svg" viewBox="0 0 700 300" style="display:block;width:100%;max-height:320px"></svg><div class="evo-legend" id="evo-legend" style="margin-top:8px"></div></div>';
+    '<div id="evo-chart" style="position:relative"><button class="copy-img-btn" id="evo-copy-btn" onclick="copyEvoImage(this)" title="Copier le graphique en image (capture d\'écran)" style="position:absolute;top:2px;right:2px;z-index:2;display:none">📷 Copier en image</button><svg id="evo-svg" viewBox="0 0 700 300" style="display:block;width:100%;max-height:520px"></svg><div class="evo-legend" id="evo-legend" style="margin-top:8px"></div></div>';
   
   renderEvoIndBar();
 }
@@ -1245,6 +1355,9 @@ function setEvoCompareDept(code) {
 function drawEvoChart() {
   var svg = document.getElementById('evo-svg');
   var legend = document.getElementById('evo-legend');
+  var cb = document.getElementById('evo-copy-btn'); if (cb) cb.style.display = 'none';
+  lastEvoExport = null;
+  if (svg) svg.setAttribute('viewBox', '0 0 700 300');
   if (!svg || !currentIndEvo) return;
   var m = ALL_META.find(function(x){return x.id===currentIndEvo;});
   if (!m) return;
@@ -1355,7 +1468,19 @@ function drawEvoChart() {
     svgHtml += '<circle cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" r="4" fill="#ED7D31" />';
   }
   
-  svg.innerHTML = svgHtml;
+  // Titre de l'indicateur EN GRAND dans le graphique (il fait partie de l'image copiée)
+  var tl = wrapLines(m.label, 56), hdr = 12 + tl.length * 24 + 24, srcShort = m.source ? String(m.source).split(' (')[0] : '';
+  var evoSub = 'Évolution de l\'Aude (11)' + (m.unit && m.fmt !== 'pct1' && m.fmt !== 'eur0' ? ' · unité : ' + m.unit : '') + (srcShort ? ' · ' + srcShort : '');
+  var headSvg = tl.map(function(ln, i) { return '<text x="14" y="' + (28 + i * 24) + '" font-size="20" font-weight="800" fill="#1a2845">' + escXml(ln) + '</text>'; }).join('') +
+    '<text x="14" y="' + (28 + (tl.length - 1) * 24 + 19) + '" font-size="11" fill="#6a7a8a">' + escXml(evoSub) + '</text>';
+  svg.setAttribute('viewBox', '0 0 700 ' + (300 + hdr));
+  svg.innerHTML = headSvg + '<g transform="translate(0,' + hdr + ')">' + svgHtml + '</g>';
+  var legItems = [{ col: '#ED7D31', label: 'Aude (11)', dashed: false }, { col: '#2E7D32', label: 'Moy. Occitanie', dashed: true }];
+  if (strTs) legItems.push({ col: '#B8860B', label: 'Moy. strate', dashed: true });
+  legItems.push({ col: '#4472C4', label: 'France métro.', dashed: true });
+  if (selectedDeptEvo) legItems.push({ col: '#bb80f0', label: DEPTS[selectedDeptEvo] || selectedDeptEvo, dashed: true });
+  lastEvoExport = { W: 700, H: 300 + hdr, inner: svg.innerHTML, legend: legItems, title: m.label, source: m.source || '' };
+  if (cb) cb.style.display = '';
   
   var legHtml = '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#ED7D31"></div>Aude (11)</div>';
   legHtml += '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:#2E7D32;opacity:.7;border:1px dashed #2E7D32"></div>Moy. Occitanie</div>';
