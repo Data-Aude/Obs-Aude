@@ -36,6 +36,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .th-financier{background:#9a4a10}
 .th-social{background:#1a5276}
 .th-aude{background:#1a6060}
+.th-revenus{background:#8a6d1a}
+.th-finances{background:#4a5a7a}
+.badge-ofgl{background:#efe6f8;color:#6b2fa0;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
+.th-emploi{background:#2a6f8f}
+.th-logement{background:#7a4a2a}
 .th-ase{background:#c0570a}
 .th-jeunesse{background:#c0570a}
 .cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
@@ -268,6 +273,9 @@ var INSEE_META = [];
 var CAF_META  = [];
 var AUDE_META = [];
 var CNSA_META = [];
+var OFGL_META = [];
+var OFGL_ABS = {};   // montants absolus (€) par indicateur OFGL : {id: {année: {dép: €}}}, utilisés pour les ratios croisés
+var evoOverlay = null; // {a, b} : deux indicateurs superposés (base 100) dans l'onglet évolution
 
 var ALL_META = [];
 
@@ -277,6 +285,10 @@ var THEMES = [
   {id:'ages', lbl:'Personnes âgées', cls:'th-ages'},
   {id:'handicap', lbl:'Handicap', cls:'th-handicap'},
   {id:'ase', lbl:'Enfance / ASE / Jeunesse', cls:'th-ase'},
+  {id:'finances', lbl:'Finances du Département', cls:'th-finances'},
+  {id:'revenus', lbl:'Revenus & pauvreté', cls:'th-revenus'},
+  {id:'emploi', lbl:'Emploi & chômage', cls:'th-emploi'},
+  {id:'logement', lbl:'Logement', cls:'th-logement'},
   {id:'social', lbl:'Social / Insertion', cls:'th-social'},
   {id:'aude', lbl:'Établissements Aude', cls:'th-aude'},
 ];
@@ -727,6 +739,7 @@ function rebuildAllMeta() {
   ALL_META = [];
   
   if (typeof DREES_META !== 'undefined') DREES_META.forEach(function(m) { ALL_META.push(m); });
+  if (typeof OFGL_META !== 'undefined') OFGL_META.forEach(function(m) { ALL_META.push(m); });
   
   if (typeof INSEE_META !== 'undefined') {
     INSEE_META.forEach(function(m) {
@@ -803,7 +816,7 @@ function renderDashCards() {
     byTheme[th].push(m);
   });
   
-  var themeOrder = ['demographie','ages','handicap','ase','jeunesse','pmi','financier','social','aude','autre'];
+  var themeOrder = ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
   var html = '';
   
   themeOrder.forEach(function(thId) {
@@ -872,6 +885,7 @@ function buildCard(m) {
   if (m.source && m.source.indexOf('CAF') >= 0) srcBadge = '<span class="badge-caf">CAF</span>';
   else if (m.source && m.source.indexOf('Open Data Aude') >= 0) srcBadge = '<span class="badge-aude">AUDE</span>';
   else if (m.source && m.source.indexOf('CNSA') >= 0) srcBadge = '<span class="badge-cnsa">CNSA</span>';
+  else if (m.source && m.source.indexOf('OFGL') >= 0) srcBadge = '<span class="badge-ofgl">OFGL</span>';
   else if (m.source && m.source.indexOf('DREES') >= 0) srcBadge = '<span class="badge-drees">DREES</span>';
   else if (m.source && m.source.indexOf('INSEE') >= 0) srcBadge = '<span class="badge-insee">INSEE</span>';
   
@@ -1083,12 +1097,20 @@ function copyRankImage(btn) {
 // Image de l'évolution : le graphique affiché (titre inclus) + légende
 function copyEvoImage(btn) {
   if (!lastEvoExport) return;
-  var e = lastEvoExport, legH = 30, H = e.H + legH + 22, out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + e.W + '" height="' + H + '" viewBox="0 0 ' + e.W + ' ' + H + '" font-family="Arial, Helvetica, sans-serif"><rect width="' + e.W + '" height="' + H + '" fill="#fff"/>' + e.inner;
-  var lx = 70;
+  var e = lastEvoExport, rows = [[]], lx = 70, rw = 0;
   e.legend.forEach(function(it) {
-    out += '<line x1="' + lx + '" y1="' + (e.H + 14) + '" x2="' + (lx + 18) + '" y2="' + (e.H + 14) + '" stroke="' + it.col + '" stroke-width="' + (it.dashed ? 2 : 3) + '"' + (it.dashed ? ' stroke-dasharray="5,3"' : '') + '/>' +
-      '<text x="' + (lx + 24) + '" y="' + (e.H + 18) + '" font-size="11" fill="#333">' + escXml(it.label) + '</text>';
-    lx += 34 + it.label.length * 6.2;
+    var w = 34 + it.label.length * 6.0;
+    if (lx + w > e.W - 20 && rows[rw].length) { rows.push([]); rw++; lx = 70; }
+    rows[rw].push({ it: it, x: lx }); lx += w;
+  });
+  var legH = rows.length * 20 + 12, H = e.H + legH + 22;
+  var out = '<svg xmlns="http://www.w3.org/2000/svg" width="' + e.W + '" height="' + H + '" viewBox="0 0 ' + e.W + ' ' + H + '" font-family="Arial, Helvetica, sans-serif"><rect width="' + e.W + '" height="' + H + '" fill="#fff"/>' + e.inner;
+  rows.forEach(function(row, ri) {
+    var yy = e.H + 14 + ri * 20;
+    row.forEach(function(c) {
+      out += '<line x1="' + c.x + '" y1="' + yy + '" x2="' + (c.x + 18) + '" y2="' + yy + '" stroke="' + c.it.col + '" stroke-width="' + (c.it.dashed ? 2 : 3) + '"' + (c.it.dashed ? ' stroke-dasharray="5,3"' : '') + '/>' +
+        '<text x="' + (c.x + 24) + '" y="' + (yy + 4) + '" font-size="11" fill="#333">' + escXml(c.it.label) + '</text>';
+    });
   });
   out += exportFooter(e.W, H - 8, e.source) + '</svg>';
   var nm = String(e.title).replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
@@ -1280,6 +1302,9 @@ function buildEvolution() {
     '<div class="controls">' +
       '<label style="color:#595959;font-size:12px">Comparer avec :</label>' +
       '<select class="dep-select" id="evo-dept-sel" onchange="setEvoCompareDept(this.value)">' + deptOptions + '</select>' +
+      '<label style="color:#595959;font-size:12px;margin-left:14px">Superposer (base 100) :</label>' +
+      '<select class="dep-select" id="evo-overlay-sel" onchange="setEvoOverlaySel(this.value)" style="max-width:340px"><option value="">— un autre indicateur —</option></select>' +
+      '<button class="copy-img-btn" id="evo-pair-btn" onclick="setEvoPair()" style="display:none;margin-left:10px" title="Dépenses et activité sur un même graphique, base 100 la première année commune">↔ Dépenses et activité sur une même courbe</button>' +
     '</div>' +
     '<div id="evo-chart" style="position:relative"><button class="copy-img-btn" id="evo-copy-btn" onclick="copyEvoImage(this)" title="Copier le graphique en image (capture d\'écran)" style="position:absolute;top:2px;right:2px;z-index:2;display:none">📷 Copier en image</button><svg id="evo-svg" viewBox="0 0 700 300" style="display:block;width:100%;max-height:520px"></svg><div class="evo-legend" id="evo-legend" style="margin-top:8px"></div></div>';
   
@@ -1287,6 +1312,7 @@ function buildEvolution() {
 }
 
 function setThemeEvo(thId) {
+  evoOverlay = null;
   currentThemeEvo = thId;
   currentIndEvo = null;
   document.querySelectorAll('#evolution .theme-btn').forEach(function(b){
@@ -1336,10 +1362,12 @@ function renderEvoIndBar() {
   
   var bar = document.getElementById('evo-ind-bar');
   if (bar) bar.innerHTML = html || '<span style="color:#888;font-size:12px">Aucune série temporelle pour ce thème</span>';
+  fillOverlaySelect();
   drawEvoChart();
 }
 
 function setIndEvo(indId) {
+  evoOverlay = null;
   currentIndEvo = indId;
   document.querySelectorAll('#evo-ind-bar .ind-btn').forEach(function(b){
     b.classList.toggle('on', b.dataset.indId === indId);
@@ -1352,12 +1380,87 @@ function setEvoCompareDept(code) {
   drawEvoChart();
 }
 
+
+// ===== Superposition de deux indicateurs sur une même courbe (base 100) =====
+function audeSeries(id) { var t = DREES_TS[id]; return t && t['11'] ? t['11'] : null; }
+function fillOverlaySelect() {
+  var sel = document.getElementById('evo-overlay-sel'), pb = document.getElementById('evo-pair-btn');
+  if (!sel) return;
+  var cur = ALL_META.find(function(m) { return m.id === currentIndEvo; }), groups = {};
+  ALL_META.forEach(function(m) {
+    var ts = audeSeries(m.id);
+    if (m.id === currentIndEvo || !ts || Object.keys(ts).length < 2) return;
+    var th = THEMES.find(function(t) { return m.themes && t.id === m.themes[0]; }), g = th ? th.lbl : 'Autres';
+    (groups[g] = groups[g] || []).push(m);
+  });
+  var html = '<option value="">— un autre indicateur —</option>';
+  Object.keys(groups).forEach(function(g) {
+    html += '<optgroup label="' + g + '">' + groups[g].map(function(m) { return '<option value="' + m.id + '"' + (evoOverlay && evoOverlay.b === m.id && evoOverlay.a === currentIndEvo ? ' selected' : '') + '>' + m.label.slice(0, 90) + '</option>'; }).join('') + '</optgroup>';
+  });
+  sel.innerHTML = html;
+  var pair = cur && cur.overlayPair && cur.overlayPair.every(function(id) { var ts = audeSeries(id); return ts && Object.keys(ts).length >= 2 && ALL_META.some(function(m) { return m.id === id; }); });
+  if (pb) pb.style.display = pair ? '' : 'none';
+}
+function setEvoOverlaySel(v) { evoOverlay = v ? { a: currentIndEvo, b: v } : null; drawEvoChart(); }
+function setEvoPair() {
+  var cur = ALL_META.find(function(m) { return m.id === currentIndEvo; });
+  if (!cur || !cur.overlayPair) return;
+  evoOverlay = (evoOverlay && evoOverlay.pairOf === cur.id) ? null : { a: cur.overlayPair[0], b: cur.overlayPair[1], pairOf: cur.id, title: cur.label.replace(/ par .*/, '') + ' : dépenses et activité' };
+  var sel = document.getElementById('evo-overlay-sel'); if (sel) sel.value = '';
+  drawEvoChart();
+}
+function drawEvoOverlay(svg) {
+  var A = ALL_META.find(function(m) { return m.id === evoOverlay.a; }), B = ALL_META.find(function(m) { return m.id === evoOverlay.b; });
+  var tsA = audeSeries(evoOverlay.a), tsB = audeSeries(evoOverlay.b), legend = document.getElementById('evo-legend');
+  if (!A || !B || !tsA || !tsB) { evoOverlay = null; return false; }
+  var years = Object.keys(tsA).filter(function(y) { return typeof tsA[y] === 'number' && typeof tsB[y] === 'number' && tsA[y] !== 0 && tsB[y] !== 0; }).sort();
+  if (years.length < 2) {
+    svg.setAttribute('viewBox', '0 0 700 80');
+    svg.innerHTML = '<text x="14" y="40" font-size="13" fill="#888">Moins de deux années en commun entre « ' + escXml(A.label) + ' » et « ' + escXml(B.label) + ' » : superposition impossible.</text>';
+    if (legend) legend.innerHTML = ''; return true;
+  }
+  var y0 = years[0], idxA = {}, idxB = {}, all = [];
+  years.forEach(function(y) { idxA[y] = tsA[y] / tsA[y0] * 100; idxB[y] = tsB[y] / tsB[y0] * 100; all.push(idxA[y], idxB[y]); });
+  var W = 700, H = 300, PL = 60, PR = 24, PT = 20, PB = 40, cW = W - PL - PR, cH = H - PT - PB;
+  var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all), pad = (mx - mn) * 0.12 || 5; mn -= pad; mx += pad;
+  var X = function(i) { return PL + (years.length === 1 ? cW / 2 : i * cW / (years.length - 1)); }, Y = function(v) { return PT + cH - (v - mn) / (mx - mn) * cH; };
+  var g = '';
+  for (var k = 0; k <= 4; k++) { var v = mn + (mx - mn) * k / 4, yy = Y(v); g += '<line x1="' + PL + '" y1="' + yy + '" x2="' + (W - PR) + '" y2="' + yy + '" stroke="#e3e8ee"/><text x="' + (PL - 8) + '" y="' + (yy + 3) + '" font-size="10" fill="#8a97a6" text-anchor="end">' + Math.round(v) + '</text>'; }
+  g += '<line x1="' + PL + '" y1="' + Y(100) + '" x2="' + (W - PR) + '" y2="' + Y(100) + '" stroke="#b9c3d0" stroke-dasharray="2,3"/>';
+  years.forEach(function(y, i) { g += '<text x="' + X(i) + '" y="' + (H - 14) + '" font-size="10" fill="#8a97a6" text-anchor="middle">' + y + '</text>'; });
+  var colA = '#ED7D31', colB = '#1f6fb5';
+  function line(idx, col, raw, m) {
+    var d = years.map(function(y, i) { return (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(idx[y]).toFixed(1); }).join(' ');
+    var out = '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="3"/>';
+    years.forEach(function(y, i) { out += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(idx[y]).toFixed(1) + '" r="3.5" fill="' + col + '"><title>' + escXml(m.label + ' — ' + y + ' : ' + fmt(raw[y], m.fmt, m.unit) + ' (indice ' + idx[y].toFixed(1) + ')') + '</title></circle>'; });
+    return out;
+  }
+  g += line(idxA, colA, tsA, A) + line(idxB, colB, tsB, B);
+  var ly = years[years.length - 1];
+  g += '<text x="' + (W - PR) + '" y="' + (Y(idxA[ly]) - 8) + '" font-size="10" font-weight="700" fill="' + colA + '" text-anchor="end">' + idxA[ly].toFixed(0) + '</text>' +
+       '<text x="' + (W - PR) + '" y="' + (Y(idxB[ly]) + 15) + '" font-size="10" font-weight="700" fill="' + colB + '" text-anchor="end">' + idxB[ly].toFixed(0) + '</text>';
+  var title = evoOverlay.title || (A.label + ' et ' + B.label), tl = wrapLines(title, 56), hdr = 12 + tl.length * 24 + 24;
+  var head = tl.map(function(ln, i) { return '<text x="14" y="' + (28 + i * 24) + '" font-size="20" font-weight="800" fill="#1a2845">' + escXml(ln) + '</text>'; }).join('') +
+    '<text x="14" y="' + (28 + (tl.length - 1) * 24 + 19) + '" font-size="11" fill="#6a7a8a">' + escXml('Évolution de l\'Aude (11) · indice base 100 = ' + y0 + ' pour chacune des deux séries') + '</text>';
+  svg.setAttribute('viewBox', '0 0 700 ' + (300 + hdr));
+  svg.innerHTML = head + '<g transform="translate(0,' + hdr + ')">' + g + '</g>';
+  var lA = A.label + ' : ' + fmtShort(tsA[y0], A.fmt) + ' → ' + fmtShort(tsA[ly], A.fmt) + (A.unit && A.fmt !== 'pct1' ? ' ' + A.unit : ''), lB = B.label + ' : ' + fmtShort(tsB[y0], B.fmt) + ' → ' + fmtShort(tsB[ly], B.fmt) + (B.unit && B.fmt !== 'pct1' ? ' ' + B.unit : '');
+  var evolA = (tsA[ly] / tsA[y0] - 1) * 100, evolB = (tsB[ly] / tsB[y0] - 1) * 100;
+  if (legend) legend.innerHTML = '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:' + colA + '"></div>' + escXml(lA) + ' (' + (evolA >= 0 ? '+' : '') + evolA.toFixed(1).replace('.', ',') + ' %)</div>' +
+    '<div class="evo-legend-item"><div class="evo-legend-dot" style="background:' + colB + '"></div>' + escXml(lB) + ' (' + (evolB >= 0 ? '+' : '') + evolB.toFixed(1).replace('.', ',') + ' %)</div>';
+  lastEvoExport = { W: 700, H: 300 + hdr, inner: svg.innerHTML, legend: [{ col: colA, label: lA + ' (' + (evolA >= 0 ? '+' : '') + evolA.toFixed(1).replace('.', ',') + ' %)', dashed: false }, { col: colB, label: lB + ' (' + (evolB >= 0 ? '+' : '') + evolB.toFixed(1).replace('.', ',') + ' %)', dashed: false }],
+    title: title, source: [A.source, B.source].filter(function(x, i, a) { return x && a.indexOf(x) === i; }).map(function(x) { return String(x).split(' (')[0]; }).join(' · ') };
+  var cb = document.getElementById('evo-copy-btn'); if (cb) cb.style.display = '';
+  return true;
+}
+
 function drawEvoChart() {
   var svg = document.getElementById('evo-svg');
   var legend = document.getElementById('evo-legend');
   var cb = document.getElementById('evo-copy-btn'); if (cb) cb.style.display = 'none';
   lastEvoExport = null;
   if (svg) svg.setAttribute('viewBox', '0 0 700 300');
+  if (svg && evoOverlay && drawEvoOverlay(svg)) return;
   if (!svg || !currentIndEvo) return;
   var m = ALL_META.find(function(x){return x.id===currentIndEvo;});
   if (!m) return;
@@ -1743,7 +1846,7 @@ async function reloadLive() {
 
     if (typeof addLog === 'function') addLog('⏳', 'Rechargement des données démarré...', false);
 
-    var totalSources = 5, doneSources = 0;
+    var totalSources = 6, doneSources = 0;
     function gaugeTick() { doneSources++; gaugeSet(6 + (doneSources / totalSources) * 90); }
     function withGauge(p) { return p.then(gaugeTick, gaugeTick); }
 
@@ -1752,7 +1855,8 @@ async function reloadLive() {
       withGauge(typeof loadDREES === 'function' ? loadDREES() : Promise.reject(new Error('loadDREES introuvable'))),
       withGauge(typeof loadAude === 'function' ? loadAude() : Promise.reject(new Error('loadAude introuvable'))),
       withGauge(typeof loadINSEE === 'function' ? loadINSEE() : Promise.reject(new Error('loadINSEE introuvable'))),
-      withGauge(typeof loadCNSA === 'function' ? loadCNSA() : Promise.reject(new Error('loadCNSA introuvable')))
+      withGauge(typeof loadCNSA === 'function' ? loadCNSA() : Promise.reject(new Error('loadCNSA introuvable'))),
+      withGauge(typeof loadOFGL === 'function' ? loadOFGL() : Promise.reject(new Error('loadOFGL introuvable')))
     ]);
     gaugeSet(100);
 
@@ -1820,7 +1924,8 @@ function buildNouveautes() {
     { label: 'Open Data Aude', match: /Établissements|Maisons De la Solidarité/ },
     { label: 'DREES',          match: /^DREES|^ind\d/ },
     { label: 'INSEE',          match: /^INSEE/ },
-    { label: 'CNSA',           match: /^CNSA/ }
+    { label: 'CNSA',           match: /^CNSA/ },
+    { label: 'OFGL',           match: /^OFGL/ }
   ];
   var statusHtml = sources.map(function(src) {
     var entry = refreshLog.find(function(e){ return src.match.test(e.msg); });
@@ -2259,6 +2364,258 @@ async function loadCAF() {
   }
 }
 
+
+// ============================================================================
+// OFGL : finances des départements (portail Opendatasoft data.ofgl.fr) + croisement avec l'activité
+// ============================================================================
+var OFGL_API = 'https://data.ofgl.fr/api/explore/v2.1/catalog/datasets/';
+var CAF_API = 'https://data.caf.fr/api/explore/v2.1/catalog/datasets/s_ben_dep-copy/records';
+function ofglYear(v) { var m = String(v == null ? '' : v).match(/(19|20)\d{2}/); return m ? m[0] : null; }
+function ofglNum(v) { if (typeof v === 'number') return isFinite(v) ? v : null; if (typeof v === 'string' && v.trim() !== '') { var x = parseFloat(v.replace(/\s/g, '').replace(',', '.')); return isNaN(x) ? null : x; } return null; }
+function ofglPick(fields, names) {
+  for (var i = 0; i < names.length; i++) { var f = fields.find(function(ff) { return normFrCnsa(ff.name) === names[i]; }); if (f) return f.name; }
+  return null;
+}
+async function ofglSchema(id) {
+  var r = await fetch(OFGL_API + id);
+  if (!r.ok) throw new Error('schéma HTTP ' + r.status);
+  var j = await r.json();
+  return Array.isArray(j.fields) ? j.fields : ((j.dataset && j.dataset.fields) || []);
+}
+// Valeurs distinctes d'un champ (agrégation côté serveur)
+async function ofglDistinct(id, field, where) {
+  var out = [];
+  for (var off = 0; off < 500; off += 100) {
+    var r = await fetch(OFGL_API + id + '/records?limit=100&offset=' + off + '&select=' + encodeURIComponent(field) + '&group_by=' + encodeURIComponent(field) + (where ? '&where=' + encodeURIComponent(where) : ''));
+    if (!r.ok) break;
+    var j = await r.json(), res = j.results || [];
+    res.forEach(function(x) { if (x[field] != null && out.indexOf(x[field]) < 0) out.push(x[field]); });
+    if (res.length < 100) break;
+  }
+  return out;
+}
+// Lecture en bloc (export JSON) ; plusieurs écritures du filtre « année » sont essayées selon le type du champ (date, nombre ou texte)
+async function ofglRows(id, selectFields, yearF, fromYear, extraWhere) {
+  var yearWheres = [yearF + '>=' + fromYear, 'year(' + yearF + ')>=' + fromYear, yearF + '>="' + fromYear + '"', ''];
+  for (var i = 0; i < yearWheres.length; i++) {
+    var parts = []; if (yearWheres[i]) parts.push(yearWheres[i]); if (extraWhere) parts.push(extraWhere);
+    var where = parts.join(' AND ');
+    try {
+      var r = await fetch(OFGL_API + id + '/exports/json?limit=-1&select=' + encodeURIComponent(selectFields.join(',')) + (where ? '&where=' + encodeURIComponent(where) : ''));
+      if (!r.ok) continue;
+      var rows = await r.json();
+      if (Array.isArray(rows) && rows.length) return { rows: rows, where: where };
+    } catch (e) { /* écriture suivante */ }
+  }
+  // repli : pagination (10 000 lignes maximum)
+  var all = [];
+  for (var off = 0; off < 10000; off += 100) {
+    var rp = await fetch(OFGL_API + id + '/records?limit=100&offset=' + off + '&select=' + encodeURIComponent(selectFields.join(',')) + (extraWhere ? '&where=' + encodeURIComponent(extraWhere) : ''));
+    if (!rp.ok) break;
+    var jp = await rp.json(), rs = jp.results || [];
+    all = all.concat(rs);
+    if (rs.length < 100) break;
+  }
+  return { rows: all, where: extraWhere || '(pagination)' };
+}
+// Crée un indicateur complet (valeur Aude, statistiques, rangs, séries) à partir de {année: {département: valeur}}
+function ofglMakeMeta(spec) {
+  var years = Object.keys(spec.map).filter(function(y) { return spec.map[y]['11'] !== undefined; }).sort();
+  if (!years.length) return null;
+  var ly = years[years.length - 1], snap = spec.map[ly], v = snap['11'];
+  if (typeof v !== 'number' || !isFinite(v)) return null;
+  var prev = OFGL_PREV_IDS.indexOf(spec.id) >= 0;
+  var e = { id: spec.id, label: spec.label, unit: spec.unit, fmt: spec.fmt, themes: spec.themes, aude: v, annee: ly, source: spec.source || 'OFGL — Comptes des départements (balances comptables DGFiP)',
+    desc: spec.desc, techName: spec.techName || '', occ: null, fra: null, rank_fr: null, rank_strate: null, rank_occ: null, total_fr: 96, total_strate: 11, total_occ: 13,
+    stats_fr: {}, stats_strate: {}, stats_occ: {}, has_ts: false, isNew: !prev && OFGL_PREV_IDS.length > 0, overlayPair: spec.overlayPair || null };
+  var cm = cleanDeptMap(snap);
+  if (Object.keys(cm).length > 1) {
+    DREES_SNAP[spec.id] = snap;
+    var fr = statsAndRankFor(snap, null), st = statsAndRankFor(snap, STRATE), oc = statsAndRankFor(snap, OCC);
+    e.stats_fr = fr.stats; e.rank_fr = fr.rank; e.total_fr = fr.total; e.fra = fr.stats.mean;
+    e.stats_strate = st.stats; e.rank_strate = st.rank; e.total_strate = st.total;
+    e.stats_occ = oc.stats; e.rank_occ = oc.rank; e.total_occ = oc.total; e.occ = oc.stats.mean;
+  } else DREES_SNAP[spec.id] = { '11': v };
+  var sA = {}, sF = {}, sO = {}, sS = {};
+  years.forEach(function(y) { sA[y] = spec.map[y]['11']; });
+  Object.keys(spec.map).forEach(function(y) {
+    var f2 = statsAndRankFor(spec.map[y], null), o2 = statsAndRankFor(spec.map[y], OCC), s2 = statsAndRankFor(spec.map[y], STRATE);
+    if (f2.total >= 20) sF[y] = f2.stats.mean;
+    if (o2.total) sO[y] = o2.stats.mean;
+    if (s2.total >= 8) sS[y] = s2.stats.mean;
+  });
+  if (setTs(spec.id, '11', sA)) { e.has_ts = true; setTs(spec.id, 'FRA', sF); setTs(spec.id, 'OCC', sO); setTs(spec.id, 'STR', sS); }
+  if (e.isNew) newCount++;
+  OFGL_META.push(e);
+  return e;
+}
+var OFGL_PREV_IDS = [];
+// Foyers RSA (ou autre champ CAF) pour TOUS les départements, au dernier mois publié de chaque année
+async function cafDeptByYear(fieldKey, nbYears) {
+  var out = {};
+  var r0 = await fetch(CAF_API + '?limit=100&order_by=' + encodeURIComponent('dtreffre DESC') + '&select=' + encodeURIComponent('dtreffre,' + fieldKey) + '&where=' + encodeURIComponent('numdep="11"'));
+  if (!r0.ok) throw new Error('CAF HTTP ' + r0.status);
+  var rows0 = (await r0.json()).results || [], lastOfYear = {};
+  rows0.forEach(function(rr) { var y = String(rr.dtreffre).slice(0, 4); if (lastOfYear[y] === undefined) lastOfYear[y] = String(rr.dtreffre); });
+  var ys = Object.keys(lastOfYear).sort().slice(-nbYears);
+  for (var i = 0; i < ys.length; i++) {
+    var m = lastOfYear[ys[i]], wheres = ['dtreffre="' + m + '"', 'dtreffre=date\'' + m + '\'', 'dtreffre>="' + m + '" AND dtreffre<="' + m + '"'], got = null;
+    for (var wi = 0; wi < wheres.length && !got; wi++) {
+      var rowsM = [];
+      try {
+        for (var off = 0; off < 300; off += 100) {
+          var rm = await fetch(CAF_API + '?limit=100&offset=' + off + '&select=' + encodeURIComponent('numdep,dtreffre,' + fieldKey) + '&where=' + encodeURIComponent(wheres[wi]));
+          if (!rm.ok) { rowsM = []; break; }
+          var res = (await rm.json()).results || [];
+          rowsM = rowsM.concat(res);
+          if (res.length < 100) break;
+        }
+      } catch (eM) { rowsM = []; }
+      if (rowsM.length > 20) got = rowsM;
+    }
+    if (!got) continue;
+    out[ys[i]] = {};
+    got.forEach(function(rr) { var c = deptCodeOf(rr.numdep), v = rr[fieldKey]; if (c && typeof v === 'number') out[ys[i]][c] = v; });
+  }
+  return out;
+}
+
+async function loadOFGL() {
+  addLog('⏳', 'Chargement OFGL (finances des départements)...');
+  OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
+  OFGL_META = []; OFGL_ABS = {};
+  var fromYear = new Date().getFullYear() - 9, nbAg = 0, nbFn = 0;
+  var fnAbs = {};   // fonctions : label → {année: {dép: €}} (pour les ratios croisés)
+  try {
+    // ---------- 1) Agrégats des comptes du budget principal ----------
+    try {
+      var idA = 'ofgl-base-departements', fA = await ofglSchema(idA);
+      addLog('ℹ️', 'OFGL (' + idA + ') : ' + fA.length + ' champs → ' + fA.map(function(f) { return f.name; }).join(', '));
+      var yF = ofglPick(fA, ['exer', 'exercice', 'annee']), aF = ofglPick(fA, ['agregat']), mF = ofglPick(fA, ['montant']), hF = ofglPick(fA, ['euros_par_habitant', 'eur_par_habitant']), pF = ofglPick(fA, ['ptot', 'population']);
+      var depC = fA.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
+      if (!yF || !aF || !(mF || hF) || !depC.length) throw new Error('champs attendus introuvables (exercice=' + yF + ', agrégat=' + aF + ', montant=' + mF + ', par habitant=' + hF + ', département=' + depC.join('/') + ')');
+      var sel = [yF, aF].concat(depC); if (mF) sel.push(mF); if (hF) sel.push(hF); if (pF) sel.push(pF);
+      var got = await ofglRows(idA, sel, yF, fromYear, '');
+      var depF = null, best = 0;
+      depC.forEach(function(c) { var ok = 0; got.rows.forEach(function(rr) { if (deptCodeOf(rr[c]) !== null) ok++; }); var sc = ok / Math.max(1, got.rows.length); if (sc > best) { best = sc; depF = c; } });
+      addLog('ℹ️', 'OFGL (' + idA + ') : ' + got.rows.length + ' lignes lues (filtre : ' + (got.where || 'aucun') + '), champ département : ' + depF + ' (' + Math.round(best * 100) + ' % reconnus).');
+      var byAg = {};
+      got.rows.forEach(function(rr) {
+        var y = ofglYear(rr[yF]), d = deptCodeOf(rr[depF]), ag = rr[aF];
+        if (!y || !d || !ag) return;
+        var mo = mF ? ofglNum(rr[mF]) : null, ph = hF ? ofglNum(rr[hF]) : null, pop = pF ? ofglNum(rr[pF]) : null;
+        if (ph === null && mo !== null && pop) ph = mo / pop;
+        if (ph === null) return;
+        var o = byAg[ag] = byAg[ag] || { h: {}, a: {} };
+        (o.h[y] = o.h[y] || {})[d] = ph;
+        if (mo !== null) (o.a[y] = o.a[y] || {})[d] = mo;
+      });
+      Object.keys(byAg).slice(0, 120).forEach(function(ag) {
+        var nl = normFrCnsa(ag), unit = '€ par hab.', fm = 'eur0', isRatio = false;
+        if (/capacite de desendettement/.test(nl)) { unit = 'années'; fm = 'dec1'; isRatio = true; }
+        else if (/\btaux\b|\bratio\b/.test(nl)) { unit = '%'; fm = 'pct1'; isRatio = true; }
+        var map = isRatio ? Object.keys(byAg[ag].a).length ? byAg[ag].a : byAg[ag].h : byAg[ag].h;
+        var e = ofglMakeMeta({ id: 'ofgl_ag_' + hashShort(ag), label: ag + (isRatio ? '' : ' (par habitant)'), unit: isRatio ? unit : '€/hab.', fmt: isRatio ? fm : 'eur0', themes: ['finances'], map: map, techName: ag,
+          desc: (isRatio ? 'Indicateur financier « ' + ag + ' »' : 'Agrégat financier « ' + ag + ' » des comptes du budget principal du Département, rapporté à la population (en euros par habitant)') + '. Calculé par l\'OFGL à partir des balances comptables de la DGFiP, exercice ' + 'le plus récent publié ; la comparaison porte sur les départements métropolitains.' });
+        if (e) { nbAg++; if (!isRatio) OFGL_ABS[e.id] = byAg[ag].a; }
+      });
+    } catch (eA) { addLog('⚠️', 'OFGL (agrégats) : ' + eA.message + '.'); }
+
+    // ---------- 2) Dépenses par fonction (action sociale : RSA, APA, enfance, handicap…) ----------
+    try {
+      var idF = 'ofgl-base-departements-fonctionnelle', fF = await ofglSchema(idF);
+      addLog('ℹ️', 'OFGL (' + idF + ') : ' + fF.length + ' champs → ' + fF.map(function(f) { return f.name; }).join(', '));
+      var yF2 = ofglPick(fF, ['exer', 'exercice', 'annee']), aF2 = ofglPick(fF, ['agregat']), mF2 = ofglPick(fF, ['montant']), hF2 = ofglPick(fF, ['euros_par_habitant', 'eur_par_habitant']), pF2 = ofglPick(fF, ['ptot', 'population']);
+      var f1 = ofglPick(fF, ['fonctionnelle_1']), f2c = ofglPick(fF, ['classement_fonctionnel_2']), lvl = ofglPick(fF, ['niveau_hierarchique']);
+      var depC2 = fF.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
+      if (!yF2 || !(mF2 || hF2) || !depC2.length || !(f1 || f2c)) throw new Error('champs attendus introuvables (exercice=' + yF2 + ', fonction=' + f1 + '/' + f2c + ', montant=' + mF2 + ', département=' + depC2.join('/') + ')');
+      // agrégat « dépenses totales » (toutes dépenses de la fonction), choisi parmi les valeurs réellement présentes
+      var agVals = aF2 ? await ofglDistinct(idF, aF2, '') : [];
+      var agChoice = agVals.find(function(v) { return normFrCnsa(v).trim() === 'depenses totales'; }) || agVals.find(function(v) { return /depenses totales/.test(normFrCnsa(v)) && !/hors/.test(normFrCnsa(v)); }) || agVals.find(function(v) { return /^depenses/.test(normFrCnsa(v)); }) || null;
+      addLog('ℹ️', 'OFGL (' + idF + ') : agrégats disponibles → ' + (agVals.slice(0, 12).join(' ; ') || '—') + ' ; retenu : ' + (agChoice || (aF2 ? 'aucun' : 'sans champ agrégat')) + '.');
+      var sel2 = [yF2].concat(depC2); [aF2, f1, f2c, lvl, mF2, hF2, pF2].forEach(function(x) { if (x) sel2.push(x); });
+      var extra = (aF2 && agChoice) ? aF2 + '="' + String(agChoice).replace(/"/g, '\\"') + '"' : '';
+      var got2 = await ofglRows(idF, sel2, yF2, fromYear, extra);
+      var depF2 = null, best2 = 0;
+      depC2.forEach(function(c) { var ok = 0; got2.rows.forEach(function(rr) { if (deptCodeOf(rr[c]) !== null) ok++; }); var sc = ok / Math.max(1, got2.rows.length); if (sc > best2) { best2 = sc; depF2 = c; } });
+      addLog('ℹ️', 'OFGL (' + idF + ') : ' + got2.rows.length + ' lignes lues (filtre : ' + (got2.where || 'aucun') + '), champ département : ' + depF2 + '.');
+      var byFn = {};
+      got2.rows.forEach(function(rr) {
+        var y = ofglYear(rr[yF2]), d = deptCodeOf(rr[depF2]);
+        var l2 = f2c ? rr[f2c] : null, l1 = f1 ? rr[f1] : null, label = l2 || l1;
+        if (!y || !d || !label) return;
+        var mo = mF2 ? ofglNum(rr[mF2]) : null, ph = hF2 ? ofglNum(rr[hF2]) : null, pop = pF2 ? ofglNum(rr[pF2]) : null;
+        if (ph === null && mo !== null && pop) ph = mo / pop;
+        var key = (l1 || '') + '|' + label + '|' + (lvl ? rr[lvl] : '');
+        var o = byFn[key] = byFn[key] || { label: label, parent: l1 || '', level: lvl ? rr[lvl] : '', h: {}, a: {} };
+        if (ph !== null) (o.h[y] = o.h[y] || {})[d] = ph;
+        if (mo !== null) (o.a[y] = o.a[y] || {})[d] = mo;
+      });
+      var social = /social|sante|insertion|rsa|solidarit|enfan|famille|personne|handic|ag[ee]e|apa\b|pch|prevention|protection|logement|emploi|jeunesse|formation/;
+      var fnKeys = Object.keys(byFn), seenLbl = {};
+      fnKeys.forEach(function(k) {
+        var o = byFn[k], t = normFrCnsa(o.parent + ' ' + o.label);
+        if (nbFn >= 120 || seenLbl[o.label + '|' + o.parent]) return;
+        var isTop = !o.parent || o.parent === o.label;
+        if (!(isTop || social.test(t))) return;
+        seenLbl[o.label + '|' + o.parent] = 1;
+        var id = 'ofgl_fn_' + hashShort(k), lab = 'Dépenses — ' + o.label + (!isTop && o.parent ? ' (' + o.parent + ')' : '');
+        var tmp = { label: o.label + ' ' + o.parent, techName: '', id: '' }, th = inferThemes(tmp);
+        var e = ofglMakeMeta({ id: id, label: lab, unit: '€/hab.', fmt: 'eur0', themes: th.length ? th : ['finances'], map: Object.keys(o.h).length ? o.h : o.a, techName: o.label,
+          desc: 'Dépenses du Département (' + (agChoice || 'dépenses totales') + ') pour la fonction « ' + o.label + ' »' + (o.parent && !isTop ? ', rubrique « ' + o.parent + ' »' : '') + ', rapportées à la population (euros par habitant). Nomenclature fonctionnelle des départements ; calcul OFGL à partir des balances comptables DGFiP.' });
+        if (e) { nbFn++; OFGL_ABS[id] = o.a; fnAbs[id] = { label: o.label, parent: o.parent, abs: o.a, h: o.h }; }
+      });
+      addLog('ℹ️', 'OFGL (' + idF + ') : ' + fnKeys.length + ' fonctions lues, ' + nbFn + ' indicateurs créés (rubriques sociales et grandes fonctions).');
+    } catch (eF) { addLog('⚠️', 'OFGL (fonctions) : ' + eF.message + '.'); }
+
+    // ---------- 3) Croisements dépenses × activité ----------
+    var nbCross = 0;
+    try { nbCross = await ofglCross(fnAbs); } catch (eC) { addLog('⚠️', 'OFGL (croisements) : ' + eC.message + '.'); }
+    addLog((nbAg + nbFn + nbCross) ? '✅' : '⚠️', 'OFGL : ' + (nbAg + nbFn + nbCross) + ' indicateur(s) chargé(s) (' + nbAg + ' agrégats, ' + nbFn + ' fonctions, ' + nbCross + ' croisements dépenses × activité).');
+  } catch (e) {
+    addLog('❌', 'OFGL erreur : ' + e.message);
+  }
+}
+function hashShort(t) { var x = 0, s2 = normFrCnsa(String(t)); for (var i = 0; i < s2.length; i++) x = (x * 31 + s2.charCodeAt(i)) | 0; return (x >>> 0).toString(36); }
+
+// Ratios « dépense du Département ÷ activité » : même type de prestation, par département et par année
+var CROSS_DEFS = [
+  { key: 'rsa', fnRe: /\brsa\b|solidarite active|revenu minimum d.insertion/, caf: 'indfoy_rsa', cafLabel: 'foyers allocataires du RSA',
+    label: 'Dépense de RSA par foyer allocataire', compLabel: 'Dépenses de RSA du Département (€)', unit: '€/foyer', 
+    desc: 'Dépenses de RSA du Département (fonction « RSA » des comptes, OFGL) divisées par le nombre de foyers allocataires du RSA (CAF, dernier mois publié de l\'année). Mesure le coût moyen annuel supporté par le Département pour un foyer. Les foyers relevant de la MSA ne sont pas comptés, ce qui peut légèrement surestimer le ratio.' }
+];
+async function ofglCross(fnAbs) {
+  var n = 0, ids = Object.keys(fnAbs);
+  for (var ci = 0; ci < CROSS_DEFS.length; ci++) {
+    var cd = CROSS_DEFS[ci];
+    // fonction correspondante : parmi celles dont l'intitulé évoque la prestation, la plus dotée pour l'Aude
+    var cands = ids.filter(function(id) { return cd.fnRe.test(normFrCnsa(fnAbs[id].label + ' ' + fnAbs[id].parent)) && Object.keys(fnAbs[id].abs).length; });
+    cands.sort(function(a, b) {
+      var la = Object.keys(fnAbs[a].abs).sort().pop(), lb = Object.keys(fnAbs[b].abs).sort().pop();
+      return ((fnAbs[b].abs[lb] || {})['11'] || 0) - ((fnAbs[a].abs[la] || {})['11'] || 0);
+    });
+    if (!cands.length) { addLog('ℹ️', 'OFGL : aucune fonction « ' + cd.key.toUpperCase() + ' » trouvée parmi les ' + ids.length + ' fonctions lues — ratio ' + cd.label + ' non calculé.'); continue; }
+    var pick = fnAbs[cands[0]];
+    addLog('ℹ️', 'OFGL : fonction retenue pour « ' + cd.label + ' » → ' + pick.label + (pick.parent ? ' (' + pick.parent + ')' : '') + (cands.length > 1 ? ' ; autres candidates : ' + cands.slice(1, 4).map(function(c) { return fnAbs[c].label; }).join(' ; ') : '') + '.');
+    var caf = await cafDeptByYear(cd.caf, 9);
+    var yearsC = Object.keys(caf);
+    if (!yearsC.length) { addLog('⚠️', 'OFGL : foyers CAF indisponibles pour le ratio ' + cd.label + '.'); continue; }
+    var ratio = {};
+    Object.keys(pick.abs).forEach(function(y) {
+      if (!caf[y]) return;
+      Object.keys(pick.abs[y]).forEach(function(d) { var den = caf[y][d], num = pick.abs[y][d]; if (den > 0 && typeof num === 'number') (ratio[y] = ratio[y] || {})[d] = num / den; });
+    });
+    // composante « dépenses » (en euros, pour la superposition avec l'activité)
+    var comp = ofglMakeMeta({ id: 'ofgl_' + cd.key + '_depenses', label: cd.compLabel, unit: '€', fmt: 'eur0', themes: inferThemes({ label: pick.label + ' ' + pick.parent, techName: '', id: '' }).concat(['finances']), map: pick.abs, techName: pick.label,
+      desc: 'Dépenses totales du Département pour la fonction « ' + pick.label + ' » (montant en euros, comptes de l\'exercice). Calcul OFGL à partir des balances comptables DGFiP.' });
+    var e = ofglMakeMeta({ id: 'cross_' + cd.key + '_par_foyer', label: cd.label, unit: cd.unit, fmt: 'eur0', themes: inferThemes({ label: pick.label + ' ' + pick.parent, techName: '', id: '' }).concat(['finances']), map: ratio, techName: cd.key,
+      source: 'OFGL × CAF — dépenses des comptes des départements rapportées à l\'activité', desc: cd.desc, overlayPair: ['ofgl_' + cd.key + '_depenses', 'caf_' + cd.caf] });
+    if (comp) n++;
+    if (e) { n++; addLog('ℹ️', 'OFGL × CAF : ' + cd.label + ' = ' + Math.round(e.aude).toLocaleString('fr-FR') + ' € (' + e.annee + '), rang ' + e.rank_fr + '/' + e.total_fr + ', ' + yearsC.length + ' année(s) de foyers CAF.'); }
+  }
+  return n;
+}
+
 async function loadAude() {
   var datasets = [
     {url:'cd11_etablissements_pa', label:'Établissements PA', themes:['ages','aude'], def:"Nombre d'établissements et services pour personnes âgées (EHPAD, résidences autonomie…) recensés sur le portail Open Data du Département de l'Aude."},
@@ -2592,8 +2949,18 @@ async function loadINSEE() {
     if (!m) return null;
     return m[1].length === 1 ? '0' + m[1] : m[1];
   }
+  var reqTimes = [], nbReq = 0;
+  async function throttle() { // jamais plus de 27 requêtes sur 60 s glissantes (limite INSEE : 30/min)
+    for (;;) {
+      var now = Date.now(); reqTimes = reqTimes.filter(function(t) { return now - t < 60000; });
+      if (reqTimes.length < 27) { reqTimes.push(now); nbReq++; return; }
+      await new Promise(function(res) { setTimeout(res, Math.max(300, 60000 - (now - reqTimes[0]) + 50)); });
+    }
+  }
   async function get(ds, geoParam, filters) {
+    await throttle();
     var r = await fetch(BASE + ds + '?' + geoParam + (filters || '') + '&maxResult=10000', { headers: { 'Accept': 'application/json' } });
+    if (r.status === 429) { await new Promise(function(res) { setTimeout(res, 20000); }); await throttle(); r = await fetch(BASE + ds + '?' + geoParam + (filters || '') + '&maxResult=10000', { headers: { 'Accept': 'application/json' } }); }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     var d = await r.json();
     return d.observations || [];
@@ -2848,11 +3215,18 @@ async function loadINSEE() {
     var dimsF = Object.keys(obsF[0].dimensions || {}).map(function(k) { return k + '=' + Array.from(new Set(obsF.map(function(o) { return dim(o, k); }))).slice(0, 6).join('/'); });
     addLog('ℹ️', 'INSEE (' + ds2 + ') : ' + obsF.length + ' observations pour l\'Aude, dimensions → ' + dimsF.join(' ; '));
     if (!measDim) throw new Error('mesures PR_MD60 / MED_SL introuvables dans la réponse');
-    var allF = await allDeps(ds2, obsF, [measDim]);
+    // Une requête par millésime : un appel « toutes années × tous départements » dépasse 10 000 lignes et serait tronqué
+    var periodsF = Array.from(new Set(obsF.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
+    var wantF = periodsF.slice(-6), natF = {}, nbNatF = 0;
+    for (var fi = 0; fi < wantF.length; fi++) {
+      try { var oF = await allDeps(ds2, obsF, [measDim], '&TIME_PERIOD=' + wantF[fi]); if (oF) { natF[wantF[fi]] = oF; nbNatF++; } } catch (eF) { /* période ignorée */ }
+    }
+    addLog('ℹ️', 'INSEE (' + ds2 + ') : ' + periodsF.length + ' millésime(s) pour l\'Aude (' + periodsF.join(', ') + ') ; comparatif départemental obtenu pour ' + nbNatF + '/' + wantF.length + ' période(s).');
+    var allF = natF[perF] || null;
     var poolF = reduceTotals((allF || obsF).filter(function(o) { return String(dim(o, 'TIME_PERIOD')) === perF; }), [measDim]);
     var fdefs = [
-      ['insee_pauv', 'PR_MD60', 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) — Filosofi, INSEE.', ['demographie', 'social']],
-      ['insee_nvmed', 'MED_SL', 'Niveau de vie médian', '€', 'eur0', 'Niveau de vie médian annuel par unité de consommation — Filosofi, INSEE.', ['demographie', 'social', 'financier']]
+      ['insee_pauv', 'PR_MD60', 'Taux de pauvreté (seuil à 60 %)', '%', 'pct1', 'Part de la population sous le seuil de pauvreté (60 % du niveau de vie médian) — Filosofi, INSEE.', ['revenus', 'social']],
+      ['insee_nvmed', 'MED_SL', 'Niveau de vie médian', '€', 'eur0', 'Niveau de vie médian annuel par unité de consommation — Filosofi, INSEE.', ['revenus']]
     ];
     // Autres mesures Filosofi présentes dans les données : chacune devient un indicateur, avec un nom en clair
     var FILO = [
@@ -2927,7 +3301,7 @@ async function loadINSEE() {
       var vs = poolF.filter(function(o) { return dim(o, measDim) === mc; }).map(val).filter(function(v) { return v !== null; });
       if (!vs.length) return;
       var inf = filosofiInfo(mc, Math.max.apply(null, vs.map(Math.abs)));
-      fdefs.push(['insee_f_' + mc.toLowerCase(), mc, inf.label, inf.unit, inf.fmt, inf.def, ['demographie', 'social']]);
+      fdefs.push(['insee_f_' + mc.toLowerCase(), mc, inf.label, inf.unit, inf.fmt, inf.def, ['revenus']]);
     });
     if (unresolvedF.length) addLog('ℹ️', 'INSEE (Filosofi) : libellé français introuvable pour ' + unresolvedF.join(', ') + ' — transmettez ces codes pour qu\'ils soient nommés.');
     fdefs.forEach(function(fd) {
@@ -2935,10 +3309,229 @@ async function loadINSEE() {
       poolF.forEach(function(o) { if (dim(o, measDim) !== fd[1]) return; var c = depCode(o), v = val(o); if (c && v !== null) snap[c] = v; });
       if (snap['11'] === undefined) { addLog('⚠️', 'INSEE : ' + fd[2] + ' absent pour l\'Aude.'); return; }
       put(fd[0], fd[2], fd[3], fd[4], snap['11'], perF, fd[5], fd[6], snap);
+      // évolution : Aude (toutes les années publiées) + moyennes France / Occitanie / strate quand le comparatif existe
+      var sA2 = {}, sF2 = {}, sO2 = {}, sS2 = {};
+      reduceTotals(obsF, [measDim]).forEach(function(o) { if (dim(o, measDim) === fd[1] && depCode(o) === '11') { var v = val(o); if (v !== null) sA2[String(dim(o, 'TIME_PERIOD'))] = v; } });
+      Object.keys(natF).forEach(function(pe) {
+        var mp = {};
+        reduceTotals(natF[pe], [measDim]).forEach(function(o) { if (dim(o, measDim) !== fd[1] || String(dim(o, 'TIME_PERIOD')) !== pe) return; var c = depCode(o), v = val(o); if (c && v !== null) mp[c] = v; });
+        var fr2 = statsAndRankFor(mp, null), oc2 = statsAndRankFor(mp, OCC), st2 = statsAndRankFor(mp, STRATE);
+        if (fr2.total >= 20) sF2[pe] = fr2.stats.mean;
+        if (oc2.total) sO2[pe] = oc2.stats.mean;
+        if (st2.total >= 8) sS2[pe] = st2.stats.mean;
+      });
+      if (setTs(fd[0], '11', sA2)) { var me = INSEE_META.find(function(m) { return m.id === fd[0]; }); if (me) me.has_ts = true; setTs(fd[0], 'FRA', sF2); setTs(fd[0], 'OCC', sO2); setTs(fd[0], 'STR', sS2); }
     });
   } catch (e) {
     addLog('⚠️', 'INSEE (Filosofi) : ' + e.message + '.');
   }
+
+  // ---------- 3) Jeux supplémentaires : logement, emploi / chômage (recensement) et pauvreté par âge ----------
+  // « Jeu à cellules » : chaque observation est une combinaison de dimensions (ex. catégorie de logement × type de logement) ;
+  // chaque indicateur est une formule sur ces cellules, calculée pour l'Aude ET pour tous les départements (rang, strate, moyennes).
+  function frTxt(v) {
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) { var f = v.find(function(x) { return x && (x.lang === 'fr' || x.langue === 'fr'); }) || v[0]; return f ? (f.content || f.value || f.text || f.label || null) : null; }
+    if (v && typeof v === 'object') return v.fr || v.FR || v['fr-FR'] || null;
+    return null;
+  }
+  async function fetchLabels(ds) { // libellés officiels des codes (métadonnées Melodi) — uniquement les codes descriptifs (pas « 1 », « 2 » : ambigus d'une dimension à l'autre)
+    var out = {};
+    try {
+      await throttle();
+      var r = await fetch('https://api.insee.fr/melodi/catalog/' + ds, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) return out;
+      var j = await r.json();
+      (function walk(o, d) {
+        if (!o || typeof o !== 'object' || d > 12) return;
+        if (!Array.isArray(o)) {
+          var cd = o.id || o.code || o.value, lb = frTxt(o.label) || frTxt(o.labels) || frTxt(o.title) || frTxt(o.name) || frTxt(o.libelle);
+          if (typeof cd === 'string' && typeof lb === 'string' && cd.length >= 3 && cd.length <= 40 && !/^\d+$/.test(cd) && lb.length > 2 && !out[cd]) out[cd] = stripHtml(lb);
+        }
+        Object.keys(o).forEach(function(k) { walk(o[k], d + 1); });
+      })(j, 0);
+    } catch (eL) { /* sans libellés */ }
+    return out;
+  }
+  async function loadCellDataset(cfg) {
+    var ds = cfg.ds, tag = 'INSEE (' + ds + ')', obsX;
+    try { obsX = await audeObs(ds); } catch (eX) { addLog('ℹ️', tag + ' : jeu indisponible (' + eX.message + ').'); return 0; }
+    var dimNames = Object.keys(obsX[0].dimensions || {}).filter(function(k) { return k !== 'GEO' && k !== 'TIME_PERIOD' && k !== 'GEO_OBJECT'; });
+    var seen = {};
+    dimNames.forEach(function(k) { seen[k] = Array.from(new Set(obsX.map(function(o) { return String(dim(o, k)); }))); });
+    addLog('ℹ️', tag + ' : ' + obsX.length + ' observations pour l\'Aude, dimensions → ' + dimNames.map(function(k) { return k + '=' + seen[k].slice(0, 12).join('/') + (seen[k].length > 12 ? '/…(' + seen[k].length + ' codes)' : ''); }).join(' ; '));
+    var periods = Array.from(new Set(obsX.map(function(o) { return String(dim(o, 'TIME_PERIOD')); }))).sort();
+    var wantP = periods.slice(-6), latestP = periods[periods.length - 1], cells = {};
+    function addCells(list, onlyP) {
+      list.forEach(function(o) {
+        var pe = String(dim(o, 'TIME_PERIOD')), c = depCode(o), v = val(o);
+        if (!c || v === null || wantP.indexOf(pe) < 0 || (onlyP && pe !== onlyP)) return;
+        var key = dimNames.map(function(k) { return k + '=' + dim(o, k); }).join('|');
+        ((cells[pe] = cells[pe] || {})[c] = cells[pe][c] || {})[key] = v;
+      });
+    }
+    addCells(obsX);
+    var labels = cfg.wantLabels ? await fetchLabels(ds) : {};
+    var built = cfg.build(seen, labels);          // { defs: [...], splits: [{keep, extra, onlyLatest}], check: fn, notes: [...] }
+    var nbNat = 0, nbTry = 0;
+    for (var pi = 0; pi < wantP.length; pi++) {
+      for (var si = 0; si < built.splits.length; si++) {
+        var sp = built.splits[si];
+        if (sp.onlyLatest && wantP[pi] !== latestP) continue;
+        nbTry++;
+        try { var oN = await allDeps(ds, obsX, sp.keep, '&TIME_PERIOD=' + wantP[pi] + (sp.extra || '')); if (oN) { addCells(oN, wantP[pi]); nbNat++; } } catch (eN) { /* requête ignorée */ }
+      }
+    }
+    // Évaluation des formules : g(spec) lit une cellule (dimensions non précisées = total « _T »)
+    var res = {};
+    function gOf(m) { return function(spec) { var key = dimNames.map(function(k) { return k + '=' + (spec[k] !== undefined ? spec[k] : '_T'); }).join('|'); return m[key] === undefined ? null : m[key]; }; }
+    if (built.check && cells[latestP] && cells[latestP]['11']) {
+      var bad = built.check(gOf(cells[latestP]['11']));
+      if (bad) { addLog('⚠️', tag + ' : ' + bad + ' — jeu ignoré (transmettez la ligne « dimensions → » ci-dessus).'); return 0; }
+    }
+    wantP.forEach(function(pe) {
+      Object.keys(cells[pe] || {}).forEach(function(d) {
+        var g = gOf(cells[pe][d]);
+        built.defs.forEach(function(df) {
+          var v = null; try { v = df.f(g); } catch (eF) { v = null; }
+          if (typeof v === 'number' && isFinite(v)) { ((res[df.id] = res[df.id] || {})[pe] = res[df.id][pe] || {})[d] = v; }
+        });
+      });
+    });
+    curSource = cfg.source;
+    var nOk = 0, missing = [];
+    built.defs.forEach(function(df) {
+      var perA = Object.keys(res[df.id] || {}).filter(function(pe) { return res[df.id][pe]['11'] !== undefined; }).sort();
+      if (!perA.length) { missing.push(df.label); return; }
+      var lp = perA[perA.length - 1], snapX = res[df.id][lp];
+      put(df.id, df.label, df.unit, df.fmt, snapX['11'], lp, df.desc, df.themes, snapX);
+      var sA = {}, sF = {}, sO = {}, sS = {};
+      perA.forEach(function(pe) { sA[pe] = res[df.id][pe]['11']; });
+      Object.keys(res[df.id]).forEach(function(pe) {
+        var fr = statsAndRankFor(res[df.id][pe], null), oc = statsAndRankFor(res[df.id][pe], OCC), st = statsAndRankFor(res[df.id][pe], STRATE);
+        if (fr.total >= 20) sF[pe] = fr.stats.mean;
+        if (oc.total) sO[pe] = oc.stats.mean;
+        if (st.total >= 8) sS[pe] = st.stats.mean;
+      });
+      if (setTs(df.id, '11', sA)) { var me = INSEE_META.find(function(m) { return m.id === df.id; }); if (me) me.has_ts = true; setTs(df.id, 'FRA', sF); setTs(df.id, 'OCC', sO); setTs(df.id, 'STR', sS); }
+      nOk++;
+    });
+    (built.notes || []).forEach(function(n) { addLog('ℹ️', tag + ' : ' + n); });
+    if (missing.length) addLog('ℹ️', tag + ' : ' + missing.length + ' indicateur(s) non calculable(s) (cellules absentes) : ' + missing.slice(0, 8).join(' ; ') + (missing.length > 8 ? ' …' : ''));
+    addLog(nOk ? '✅' : '⚠️', tag + ' : ' + nOk + ' indicateur(s) calculé(s) — millésimes ' + periods.join(', ') + ' ; comparatif départemental : ' + nbNat + '/' + nbTry + ' requête(s) réussie(s).');
+    return nOk;
+  }
+  function pctOf(num, den) { return function(g) { var n = num(g), d = den(g); return (d && n !== null) ? n / d * 100 : null; }; }
+
+  // --- Logement (recensement, exploitation principale) : catégories OCS (résidences principales / secondaires et occasionnels / vacants), type TDW (1 maison, 2 appartement)
+  var CFG_LOGEMENT = {
+    ds: 'DS_RP_LOGEMENT_PRINC', source: 'INSEE — Recensement de la population, logement (API Melodi)', wantLabels: true,
+    build: function(seen, labels) {
+      var main = function(g) { return g({ OCS: 'DW_MAIN' }); };
+      var total = function(g) { var t = g({ OCS: '_T' }); if (t === null) { var a = main(g), b = g({ OCS: 'DW_SEC_DW_OCC' }), c = g({ OCS: 'DW_VAC' }); if (a !== null && b !== null && c !== null) t = a + b + c; } return t; };
+      var D = 'Recensement de la population, exploitation principale (INSEE).';
+      var defs = [
+        { id: 'insee_lgt_total', label: 'Nombre de logements', unit: '', fmt: 'int', f: total, themes: ['logement'], desc: 'Nombre total de logements du département : résidences principales, résidences secondaires et logements occasionnels, logements vacants. ' + D },
+        { id: 'insee_lgt_rp', label: 'Nombre de résidences principales', unit: '', fmt: 'int', f: main, themes: ['logement'], desc: 'Logements occupés de manière habituelle comme domicile par un ou plusieurs ménages. ' + D },
+        { id: 'insee_lgt_rp_part', label: 'Part des résidences principales dans les logements', unit: '%', fmt: 'pct1', f: pctOf(main, total), themes: ['logement'], desc: 'Résidences principales rapportées à l\'ensemble des logements du département. Plus la part est faible, plus le parc compte de résidences secondaires ou de logements vacants. ' + D },
+        { id: 'insee_lgt_rs_part', label: 'Part des résidences secondaires et logements occasionnels', unit: '%', fmt: 'pct1', f: pctOf(function(g) { return g({ OCS: 'DW_SEC_DW_OCC' }); }, total), themes: ['logement'], desc: 'Résidences secondaires (week-ends, loisirs, vacances) et logements occasionnels (utilisés une partie de l\'année pour des raisons professionnelles), rapportés à l\'ensemble des logements. ' + D },
+        { id: 'insee_lgt_vac_part', label: 'Part des logements vacants', unit: '%', fmt: 'pct1', f: pctOf(function(g) { return g({ OCS: 'DW_VAC' }); }, total), themes: ['logement'], desc: 'Logements inoccupés (proposés à la vente ou à la location, en attente d\'occupation, de règlement de succession, ou conservés sans affectation précise), rapportés à l\'ensemble des logements. ' + D },
+        { id: 'insee_lgt_maison_part', label: 'Part des maisons dans les résidences principales', unit: '%', fmt: 'pct1', f: pctOf(function(g) { return g({ OCS: 'DW_MAIN', TDW: '1' }); }, main), themes: ['logement'], desc: 'Résidences principales qui sont des maisons individuelles, rapportées à l\'ensemble des résidences principales. ' + D },
+        { id: 'insee_lgt_appart_part', label: 'Part des appartements dans les résidences principales', unit: '%', fmt: 'pct1', f: pctOf(function(g) { return g({ OCS: 'DW_MAIN', TDW: '2' }); }, main), themes: ['logement'], desc: 'Résidences principales qui sont des appartements, rapportées à l\'ensemble des résidences principales. ' + D }
+      ];
+      var splits = [{ keep: ['OCS', 'TDW'], extra: '' }], notes = [], unresolved = [], nAuto = 0, nDims = 0;
+      // Autres dimensions du jeu (statut d'occupation, ancienneté, nombre de pièces…) : parts parmi les résidences principales, si les codes ont un libellé officiel
+      Object.keys(seen).filter(function(k) { return k !== 'OCS' && k !== 'TDW' && seen[k].indexOf('_T') >= 0; }).forEach(function(k) {
+        var useful = seen[k].filter(function(c) { return c !== '_T' && labels[c] && labels[c] !== c; });
+        seen[k].forEach(function(c) { if (c !== '_T' && !(labels[c] && labels[c] !== c)) unresolved.push(k + ':' + c); });
+        if (!useful.length || nDims >= 4) return;
+        nDims++;
+        splits.push({ keep: ['OCS', k], extra: '&OCS=DW_MAIN', onlyLatest: true });
+        useful.slice(0, 15).forEach(function(c) {
+          if (nAuto >= 40) return; nAuto++;
+          defs.push({ id: 'insee_lgt_' + k.toLowerCase() + '_' + String(c).toLowerCase().replace(/[^a-z0-9]+/g, '_'), label: 'Part des résidences principales — ' + labels[c], unit: '%', fmt: 'pct1', themes: ['logement'],
+            f: function(g) { var sp = { OCS: 'DW_MAIN' }; sp[k] = c; return pctOf(function(h) { return h(sp); }, main)(g); },
+            desc: 'Résidences principales correspondant à « ' + labels[c] + ' » (dimension ' + k + ' du recensement), rapportées à l\'ensemble des résidences principales. ' + D });
+        });
+      });
+      if (nAuto) notes.push(nAuto + ' indicateur(s) supplémentaire(s) détecté(s) automatiquement (dimensions ' + Object.keys(seen).filter(function(k) { return k !== 'OCS' && k !== 'TDW'; }).join(', ') + ').');
+      if (unresolved.length) notes.push('codes sans libellé officiel ignorés : ' + unresolved.slice(0, 20).join(', ') + (unresolved.length > 20 ? ' …' : '') + ' — transmettez-moi cette ligne pour que je les nomme.');
+      if (seen.OCS && !seen.OCS.some(function(c) { return c === 'DW_MAIN'; })) notes.push('codes OCS rencontrés : ' + seen.OCS.join(', ') + ' (DW_MAIN attendu pour les résidences principales).');
+      return { defs: defs, splits: splits, notes: notes };
+    }
+  };
+
+  // --- Emploi / chômage au sens du recensement (lieu de résidence) : EMPSTA_ENQ 1 = actifs occupés, 1T2 = actifs, _T = population
+  var CFG_EMPLOI = {
+    ds: 'DS_RP_EMPLOI_LR_PRINC', source: 'INSEE — Recensement de la population, emploi (API Melodi)', wantLabels: false,
+    build: function(seen) {
+      var E = function(a, sx) { return function(g) { return g({ AGE: a, SEX: sx, EMPSTA_ENQ: '1' }); }; };
+      var A = function(a, sx) { return function(g) { var v = g({ AGE: a, SEX: sx, EMPSTA_ENQ: '1T2' }); if (v === null) { var e = E(a, sx)(g), u = g({ AGE: a, SEX: sx, EMPSTA_ENQ: '2' }); if (e !== null && u !== null) v = e + u; } return v; }; };
+      var P = function(a, sx) { return function(g) { return g({ AGE: a, SEX: sx, EMPSTA_ENQ: '_T' }); }; };
+      var U = function(a, sx) { return function(g) { var act = A(a, sx)(g), e = E(a, sx)(g); return (act !== null && e !== null) ? act - e : null; }; }; // chômeurs = actifs − actifs occupés
+      var D = 'Recensement de la population, lieu de résidence (INSEE). Le chômage est ici déclaratif (personnes se déclarant au chômage), donc différent du taux de chômage au sens du BIT publié chaque trimestre.';
+      var hasAge = function(a) { return !seen.AGE || seen.AGE.indexOf(a) >= 0; }, hasSex = function(x) { return !seen.SEX || seen.SEX.indexOf(x) >= 0; };
+      var defs = [
+        { id: 'insee_emp_nb', label: 'Actifs de 15-64 ans ayant un emploi', unit: '', fmt: 'int', f: E('Y15T64', '_T'), themes: ['emploi'], desc: 'Nombre de personnes de 15 à 64 ans résidant dans le département et ayant un emploi. ' + D },
+        { id: 'insee_chom_nb', label: 'Chômeurs de 15-64 ans', unit: '', fmt: 'int', f: U('Y15T64', '_T'), themes: ['emploi'], desc: 'Nombre de personnes de 15 à 64 ans actives (en emploi ou au chômage) sans emploi : actifs moins actifs occupés. ' + D },
+        { id: 'insee_chom_tx', label: 'Taux de chômage des 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(U('Y15T64', '_T'), A('Y15T64', '_T')), themes: ['emploi'], desc: 'Chômeurs rapportés aux actifs (actifs occupés + chômeurs) de 15 à 64 ans. ' + D },
+        { id: 'insee_act_tx', label: 'Taux d\'activité des 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(A('Y15T64', '_T'), P('Y15T64', '_T')), themes: ['emploi'], desc: 'Actifs (en emploi ou au chômage) rapportés à la population de 15 à 64 ans. ' + D },
+        { id: 'insee_emp_tx', label: 'Taux d\'emploi des 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(E('Y15T64', '_T'), P('Y15T64', '_T')), themes: ['emploi'], desc: 'Personnes ayant un emploi rapportées à la population de 15 à 64 ans. ' + D }
+      ];
+      if (hasSex('F')) { defs.push({ id: 'insee_chom_tx_f', label: 'Taux de chômage des femmes de 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(U('Y15T64', 'F'), A('Y15T64', 'F')), themes: ['emploi'], desc: 'Chômeuses rapportées aux actives de 15 à 64 ans. ' + D });
+        defs.push({ id: 'insee_emp_tx_f', label: 'Taux d\'emploi des femmes de 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(E('Y15T64', 'F'), P('Y15T64', 'F')), themes: ['emploi'], desc: 'Femmes de 15 à 64 ans ayant un emploi rapportées à l\'ensemble des femmes de cette tranche d\'âge. ' + D }); }
+      if (hasSex('M')) defs.push({ id: 'insee_chom_tx_h', label: 'Taux de chômage des hommes de 15-64 ans', unit: '%', fmt: 'pct1', f: pctOf(U('Y15T64', 'M'), A('Y15T64', 'M')), themes: ['emploi'], desc: 'Chômeurs rapportés aux actifs hommes de 15 à 64 ans. ' + D });
+      if (hasAge('Y15T24')) defs.push({ id: 'insee_chom_tx_1524', label: 'Taux de chômage des 15-24 ans', unit: '%', fmt: 'pct1', f: pctOf(U('Y15T24', '_T'), A('Y15T24', '_T')), themes: ['emploi'], desc: 'Jeunes actifs de 15 à 24 ans au chômage rapportés aux jeunes actifs (hors élèves et étudiants inactifs). ' + D });
+      if (hasAge('Y25T54')) defs.push({ id: 'insee_emp_tx_2554', label: 'Taux d\'emploi des 25-54 ans', unit: '%', fmt: 'pct1', f: pctOf(E('Y25T54', '_T'), P('Y25T54', '_T')), themes: ['emploi'], desc: 'Personnes de 25 à 54 ans ayant un emploi rapportées à la population de cette tranche d\'âge. ' + D });
+      if (hasAge('Y55T64')) defs.push({ id: 'insee_emp_tx_5564', label: 'Taux d\'emploi des 55-64 ans', unit: '%', fmt: 'pct1', f: pctOf(E('Y55T64', '_T'), P('Y55T64', '_T')), themes: ['emploi'], desc: 'Seniors de 55 à 64 ans ayant un emploi rapportés à la population de cette tranche d\'âge. ' + D });
+      var ages = ['Y15T64', 'Y15T24', 'Y25T54', 'Y55T64'].filter(hasAge);
+      return { defs: defs,
+        splits: (seen.AGE ? ages : ['']).map(function(a) { return { keep: Object.keys(seen), extra: a ? '&AGE=' + a : '' }; }),
+        check: function(g) { var e = E('Y15T64', '_T')(g), a = A('Y15T64', '_T')(g), p = P('Y15T64', '_T')(g); return (e !== null && a !== null && p !== null && !(e <= a && a <= p)) ? 'incohérence des codes EMPSTA_ENQ (attendu : emploi ≤ actifs ≤ population)' : null; } };
+    }
+  };
+
+  // --- Pauvreté selon l'âge de la personne de référence fiscale (Filosofi) — jeu essayé, ignoré s'il n'existe pas
+  var CFG_PAUV_AGE = {
+    ds: 'DS_FILOSOFI_AGE_TP_MEN', source: 'INSEE — Filosofi (API Melodi)', wantLabels: false,
+    build: function(seen) {
+      var mDim = null, aDim = null, ageCodes = [];
+      Object.keys(seen).forEach(function(k) { if (seen[k].indexOf('PR_MD60') >= 0) mDim = k; });
+      Object.keys(seen).forEach(function(k) { if (k !== mDim) { var okc = seen[k].filter(function(c) { return /^Y(_LT|_GE)?\d/.test(c); }); if (okc.length >= 2) { aDim = k; ageCodes = okc; } } });
+      if (!mDim || !aDim) return { defs: [], splits: [], notes: ['mesure PR_MD60 ou dimension d\'âge introuvable (dimensions : ' + Object.keys(seen).join(', ') + ').'] };
+      function descr(c) { var m; if ((m = /^Y_LT(\d+)$/.exec(c))) return 'a moins de ' + m[1] + ' ans'; if ((m = /^Y_GE(\d+)$/.exec(c))) return 'a ' + m[1] + ' ans ou plus'; if ((m = /^Y(\d+)T(\d+)$/.exec(c))) return 'a entre ' + m[1] + ' et ' + m[2] + ' ans'; return null; }
+      function lbl(c) { var m; if ((m = /^Y_LT(\d+)$/.exec(c))) return 'moins de ' + m[1] + ' ans'; if ((m = /^Y_GE(\d+)$/.exec(c))) return m[1] + ' ans ou plus'; if ((m = /^Y(\d+)T(\d+)$/.exec(c))) return m[1] + '-' + m[2] + ' ans'; return c; }
+      var defs = ageCodes.filter(descr).map(function(c) {
+        var lo = (/^Y_LT/.test(c)) ? 0 : +(/(\d+)/.exec(c) || [0, 0])[1];
+        return { id: 'insee_pauv_age_' + c.toLowerCase(), label: 'Taux de pauvreté — référent fiscal de ' + lbl(c), unit: '%', fmt: 'pct1', themes: lo >= 60 ? ['revenus', 'ages'] : ['revenus', 'social'],
+          f: function(g) { var sp = {}; sp[mDim] = 'PR_MD60'; sp[aDim] = c; return g(sp); },
+          desc: 'Part des personnes vivant sous le seuil de pauvreté (60 % du niveau de vie médian) dans les ménages dont la personne de référence fiscale ' + descr(c) + '. Le niveau de vie est le revenu disponible du ménage par unité de consommation (Filosofi, INSEE).' };
+      });
+      return { defs: defs, splits: [{ keep: [mDim, aDim], extra: '&' + mDim + '=PR_MD60' }], notes: [] };
+    }
+  };
+
+  var xTotal = 0;
+  for (var xi = 0, xcfgs = [CFG_LOGEMENT, CFG_EMPLOI, CFG_PAUV_AGE]; xi < xcfgs.length; xi++) {
+    try { xTotal += await loadCellDataset(xcfgs[xi]); } catch (eCell) { addLog('⚠️', 'INSEE (' + xcfgs[xi].ds + ') : ' + eCell.message + '.'); }
+  }
+  // Catalogue Melodi : liste des jeux liés au logement / emploi / revenus (pour étendre l'outil sans deviner les identifiants)
+  try {
+    await throttle();
+    var rcat = await fetch('https://api.insee.fr/melodi/catalog/all', { headers: { 'Accept': 'application/json' } });
+    if (rcat.ok) {
+      var jcat = await rcat.json(), foundDs = {};
+      (function walkC(o, d) {
+        if (!o || typeof o !== 'object' || d > 8) return;
+        if (!Array.isArray(o)) { var idc = o.identifier || o.id, tc = frTxt(o.title) || frTxt(o.label); if (typeof idc === 'string' && /^DS_/.test(idc) && typeof tc === 'string') foundDs[idc] = tc; }
+        Object.keys(o).forEach(function(k) { walkC(o[k], d + 1); });
+      })(jcat, 0);
+      var wantRe = /logement|emploi|ch[oô]mage|activit|revenu|niveau de vie|pauvret|filosofi|m[ée]nage/i;
+      var candC = Object.keys(foundDs).filter(function(id) { return wantRe.test(foundDs[id]) || /LOGEMENT|EMPLOI|CHOM|FILOSOFI|REVENU|ACTIVITE/.test(id); });
+      if (candC.length) addLog('ℹ️', 'INSEE (catalogue Melodi) : ' + Object.keys(foundDs).length + ' jeux ; logement / emploi / revenus → ' + candC.slice(0, 30).map(function(id) { return id + ' (' + foundDs[id].slice(0, 55) + ')'; }).join(' ; '));
+    }
+  } catch (eCat) { /* catalogue illisible : sans incidence */ }
+  addLog('ℹ️', 'INSEE : ' + nbReq + ' requêtes envoyées à l\'API Melodi.');
   var nbIns = INSEE_META.length, nbCmp = INSEE_META.filter(function(m) { return m.stats_fr && m.stats_fr.n > 0; }).length;
   addLog(nbIns ? '✅' : '⚠️', 'INSEE : ' + nbIns + ' indicateur(s) chargé(s) (dont ' + nbCmp + ' avec comparatif départemental).', nbIns > 0);
 }
