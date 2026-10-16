@@ -2487,91 +2487,116 @@ async function loadOFGL() {
   var fromYear = new Date().getFullYear() - 9, nbAg = 0, nbFn = 0;
   var fnAbs = {};   // fonctions : label → {année: {dép: €}} (pour les ratios croisés)
   try {
-    // ---------- 1) Agrégats des comptes du budget principal ----------
-    try {
-      var idA = 'ofgl-base-departements', fA = await ofglSchema(idA);
-      addLog('ℹ️', 'OFGL (' + idA + ') : ' + fA.length + ' champs → ' + fA.map(function(f) { return f.name; }).join(', '));
-      var yF = ofglPick(fA, ['exer', 'exercice', 'annee']), aF = ofglPick(fA, ['agregat']), mF = ofglPick(fA, ['montant']), hF = ofglPick(fA, ['euros_par_habitant', 'eur_par_habitant']), pF = ofglPick(fA, ['ptot', 'population']);
-      var depC = fA.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
-      if (!yF || !aF || !(mF || hF) || !depC.length) throw new Error('champs attendus introuvables (exercice=' + yF + ', agrégat=' + aF + ', montant=' + mF + ', par habitant=' + hF + ', département=' + depC.join('/') + ')');
-      var sel = [yF, aF].concat(depC); if (mF) sel.push(mF); if (hF) sel.push(hF); if (pF) sel.push(pF);
-      var got = await ofglRows(idA, sel, yF, fromYear, '');
-      var depF = null, best = 0;
-      depC.forEach(function(c) { var ok = 0; got.rows.forEach(function(rr) { if (deptCodeOf(rr[c]) !== null) ok++; }); var sc = ok / Math.max(1, got.rows.length); if (sc > best) { best = sc; depF = c; } });
-      addLog('ℹ️', 'OFGL (' + idA + ') : ' + got.rows.length + ' lignes lues (filtre : ' + (got.where || 'aucun') + '), champ département : ' + depF + ' (' + Math.round(best * 100) + ' % reconnus).');
-      var byAg = {};
-      got.rows.forEach(function(rr) {
-        var y = ofglYear(rr[yF]), d = deptCodeOf(rr[depF]), ag = rr[aF];
-        if (!y || !d || !ag) return;
-        var mo = mF ? ofglNum(rr[mF]) : null, ph = hF ? ofglNum(rr[hF]) : null, pop = pF ? ofglNum(rr[pF]) : null;
-        if (ph === null && mo !== null && pop) ph = mo / pop;
-        if (ph === null) return;
-        var o = byAg[ag] = byAg[ag] || { h: {}, a: {} };
-        (o.h[y] = o.h[y] || {})[d] = ph;
-        if (mo !== null) (o.a[y] = o.a[y] || {})[d] = mo;
-      });
-      Object.keys(byAg).slice(0, 120).forEach(function(ag) {
-        var nl = normFrCnsa(ag), unit = '€ par hab.', fm = 'eur0', isRatio = false;
-        if (/capacite de desendettement/.test(nl)) { unit = 'années'; fm = 'dec1'; isRatio = true; }
-        else if (/\btaux\b|\bratio\b/.test(nl)) { unit = '%'; fm = 'pct1'; isRatio = true; }
-        var map = isRatio ? Object.keys(byAg[ag].a).length ? byAg[ag].a : byAg[ag].h : byAg[ag].h;
-        var e = ofglMakeMeta({ id: 'ofgl_ag_' + hashShort(ag), label: ag + (isRatio ? '' : ' (par habitant)'), unit: isRatio ? unit : '€/hab.', fmt: isRatio ? fm : 'eur0', themes: ['finances'], map: map, techName: ag,
-          desc: (isRatio ? 'Indicateur financier « ' + ag + ' »' : 'Agrégat financier « ' + ag + ' » des comptes du budget principal du Département, rapporté à la population (en euros par habitant)') + '. Calculé par l\'OFGL à partir des balances comptables de la DGFiP, exercice ' + 'le plus récent publié ; la comparaison porte sur les départements métropolitains.' });
-        if (e) { nbAg++; if (!isRatio) OFGL_ABS[e.id] = byAg[ag].a; }
-      });
-    } catch (eA) { addLog('⚠️', 'OFGL (agrégats) : ' + eA.message + '.'); }
-
-    // ---------- 2) Dépenses par fonction (action sociale : RSA, APA, enfance, handicap…) ----------
+    // ---------- Dépenses d'action sociale retenues (liste volontairement courte) ----------
     try {
       var idF = 'ofgl-base-departements-fonctionnelle', fF = await ofglSchema(idF);
       addLog('ℹ️', 'OFGL (' + idF + ') : ' + fF.length + ' champs → ' + fF.map(function(f) { return f.name; }).join(', '));
       var yF2 = ofglPick(fF, ['exer', 'exercice', 'annee']), aF2 = ofglPick(fF, ['agregat']), mF2 = ofglPick(fF, ['montant']), hF2 = ofglPick(fF, ['euros_par_habitant', 'eur_par_habitant']), pF2 = ofglPick(fF, ['ptot', 'population']);
-      var f1 = ofglPick(fF, ['fonctionnelle_1']), f2c = ofglPick(fF, ['classement_fonctionnel_2']), lvl = ofglPick(fF, ['niveau_hierarchique']);
+      var f1 = ofglPick(fF, ['fonctionnelle_1']), f2c = ofglPick(fF, ['classement_fonctionnel_2']), lvl = ofglPick(fF, ['niveau_hierarchique']), tbF = ofglPick(fF, ['type_de_budget']);
       var depC2 = fF.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
-      if (!yF2 || !(mF2 || hF2) || !depC2.length || !(f1 || f2c)) throw new Error('champs attendus introuvables (exercice=' + yF2 + ', fonction=' + f1 + '/' + f2c + ', montant=' + mF2 + ', département=' + depC2.join('/') + ')');
-      // agrégat « dépenses totales » (toutes dépenses de la fonction), choisi parmi les valeurs réellement présentes
-      var agVals = aF2 ? await ofglDistinct(idF, aF2, '') : [];
-      var agChoice = agVals.find(function(v) { return normFrCnsa(v).trim() === 'depenses totales'; }) || agVals.find(function(v) { return /depenses totales/.test(normFrCnsa(v)) && !/hors/.test(normFrCnsa(v)); }) || agVals.find(function(v) { return /^depenses/.test(normFrCnsa(v)); }) || null;
-      addLog('ℹ️', 'OFGL (' + idF + ') : agrégats disponibles → ' + (agVals.slice(0, 12).join(' ; ') || '—') + ' ; retenu : ' + (agChoice || (aF2 ? 'aucun' : 'sans champ agrégat')) + '.');
-      var sel2 = [yF2].concat(depC2); [aF2, f1, f2c, lvl, mF2, hF2, pF2].forEach(function(x) { if (x) sel2.push(x); });
-      var extra = (aF2 && agChoice) ? aF2 + '="' + String(agChoice).replace(/"/g, '\\"') + '"' : '';
-      var got2 = await ofglRows(idF, sel2, yF2, fromYear, extra);
-      var depF2 = null, best2 = 0;
-      depC2.forEach(function(c) { var ok = 0; got2.rows.forEach(function(rr) { if (deptCodeOf(rr[c]) !== null) ok++; }); var sc = ok / Math.max(1, got2.rows.length); if (sc > best2) { best2 = sc; depF2 = c; } });
-      addLog('ℹ️', 'OFGL (' + idF + ') : ' + got2.rows.length + ' lignes lues (filtre : ' + (got2.where || 'aucun') + '), champ département : ' + depF2 + '.');
-      var byFn = {};
-      got2.rows.forEach(function(rr) {
-        var y = ofglYear(rr[yF2]), d = deptCodeOf(rr[depF2]);
-        var l2 = f2c ? rr[f2c] : null, l1 = f1 ? rr[f1] : null, label = l2 || l1;
-        if (!y || !d || !label) return;
-        var mo = mF2 ? ofglNum(rr[mF2]) : null, ph = hF2 ? ofglNum(rr[hF2]) : null, pop = pF2 ? ofglNum(rr[pF2]) : null;
-        if (ph === null && mo !== null && pop) ph = mo / pop;
-        var key = (l1 || '') + '|' + label + '|' + (lvl ? rr[lvl] : '');
-        var o = byFn[key] = byFn[key] || { label: label, parent: l1 || '', level: lvl ? rr[lvl] : '', h: {}, a: {} };
-        if (ph !== null) (o.h[y] = o.h[y] || {})[d] = ph;
-        if (mo !== null) (o.a[y] = o.a[y] || {})[d] = mo;
-      });
-      var social = /social|sante|insertion|rsa|solidarit|enfan|famille|personne|handic|ag[ee]e|apa\b|pch|prevention|protection|logement|emploi|jeunesse|formation/;
-      var fnKeys = Object.keys(byFn), seenLbl = {};
-      fnKeys.forEach(function(k) {
-        var o = byFn[k], t = normFrCnsa(o.parent + ' ' + o.label);
-        if (nbFn >= 120 || seenLbl[o.label + '|' + o.parent]) return;
-        var isTop = !o.parent || o.parent === o.label;
-        if (!(isTop || social.test(t))) return;
-        seenLbl[o.label + '|' + o.parent] = 1;
-        var id = 'ofgl_fn_' + hashShort(k), lab = 'Dépenses — ' + o.label + (!isTop && o.parent ? ' (' + o.parent + ')' : '');
-        var tmp = { label: o.label + ' ' + o.parent, techName: '', id: '' }, th = inferThemes(tmp);
-        var e = ofglMakeMeta({ id: id, label: lab, unit: '€/hab.', fmt: 'eur0', themes: th.length ? th : ['finances'], map: Object.keys(o.h).length ? o.h : o.a, techName: o.label,
-          desc: 'Dépenses du Département (' + (agChoice || 'dépenses totales') + ') pour la fonction « ' + o.label + ' »' + (o.parent && !isTop ? ', rubrique « ' + o.parent + ' »' : '') + ', rapportées à la population (euros par habitant). Nomenclature fonctionnelle des départements ; calcul OFGL à partir des balances comptables DGFiP.' });
-        if (e) { nbFn++; OFGL_ABS[id] = o.a; fnAbs[id] = { label: o.label, parent: o.parent, abs: o.a, h: o.h }; }
-      });
-      addLog('ℹ️', 'OFGL (' + idF + ') : ' + fnKeys.length + ' fonctions lues, ' + nbFn + ' indicateurs créés (rubriques sociales et grandes fonctions).');
-    } catch (eF) { addLog('⚠️', 'OFGL (fonctions) : ' + eF.message + '.'); }
+      if (!yF2 || !aF2 || !mF2 || !depC2.length) throw new Error('champs attendus introuvables (exercice=' + yF2 + ', agrégat=' + aF2 + ', montant=' + mF2 + ', département=' + depC2.join('/') + ')');
+      var agVals = await ofglDistinct(idF, aF2, '');
+      addLog('ℹ️', 'OFGL (' + idF + ') : agrégats disponibles → ' + (agVals.slice(0, 14).join(' ; ') || '—'));
+      // budget principal uniquement (pas les budgets annexes) si le champ existe
+      var tbWhere = '';
+      if (tbF) {
+        var tbVals = await ofglDistinct(idF, tbF, ''), tbPr = tbVals.find(function(v) { return /principal/.test(normFrCnsa(v)); });
+        if (tbPr) tbWhere = tbF + '="' + String(tbPr).replace(/"/g, '\\"') + '"';
+        addLog('ℹ️', 'OFGL : types de budget → ' + (tbVals.join(' ; ') || '—') + ' ; retenu : ' + (tbPr || 'aucun filtre') + '.');
+      }
+      var selB = [yF2].concat(depC2, [aF2, mF2]); [f1, f2c, lvl, pF2, hF2].forEach(function(x) { if (x) selB.push(x); });
+      var depPick = function(rows, cols) {
+        var d0 = null, b0 = 0;
+        cols.forEach(function(c) { var ok = 0; rows.forEach(function(rr) { if (deptCodeOf(rr[c]) !== null) ok++; }); var sc = ok / Math.max(1, rows.length); if (sc > b0) { b0 = sc; d0 = c; } });
+        return d0;
+      };
+      // Somme des montants par département et année, population prise une seule fois ; € par habitant = montant ÷ population (champs OFGL)
+      var accumulate = function(rows, depField, labelOf) {
+        var out = {};
+        rows.forEach(function(rr) {
+          var y = ofglYear(rr[yF2]), d = deptCodeOf(rr[depField]), lab = labelOf(rr), mo = ofglNum(rr[mF2]);
+          if (!y || !d || !lab || mo === null) return;
+          var o = out[lab.key] = out[lab.key] || { label: lab.label, parent: lab.parent || '', a: {}, pop: {}, hh: {}, h: {} };
+          (o.a[y] = o.a[y] || {})[d] = ((o.a[y] || {})[d] || 0) + mo;
+          var pop = pF2 ? ofglNum(rr[pF2]) : null, ph = hF2 ? ofglNum(rr[hF2]) : null;
+          if (pop) (o.pop[y] = o.pop[y] || {})[d] = pop;
+          if (ph !== null) (o.hh[y] = o.hh[y] || {})[d] = ((o.hh[y] || {})[d] || 0) + ph;
+        });
+        Object.keys(out).forEach(function(k) {
+          var o = out[k];
+          Object.keys(o.a).forEach(function(y) { Object.keys(o.a[y]).forEach(function(d) {
+            var pop = (o.pop[y] || {})[d], v = pop ? o.a[y][d] / pop : (o.hh[y] || {})[d];
+            if (typeof v === 'number' && isFinite(v)) (o.h[y] = o.h[y] || {})[d] = v;
+          }); });
+        });
+        return out;
+      };
+      // ---- A) Allocations individuelles de solidarité (RSA, APA, PCH) : agrégats dédiés de l'OFGL ----
+      var ALLOC = [
+        { key: 'rsa', re: /allocations? rsa|^rsa$/, label: 'Allocations RSA versées par le Département', theme: ['social'], what: 'du revenu de solidarité active (RSA)' },
+        { key: 'apa', re: /allocations? apa|^apa$/, label: 'Allocations APA versées par le Département', theme: ['ages'], what: 'de l\'allocation personnalisée d\'autonomie (APA)' },
+        { key: 'pch', re: /allocations? pch|^pch$/, label: 'Allocations PCH versées par le Département', theme: ['handicap'], what: 'de la prestation de compensation du handicap (PCH)' }
+      ];
+      var allocNames = []; ALLOC.forEach(function(al) { al.ag = agVals.find(function(v) { return al.re.test(normFrCnsa(v)); }); if (al.ag) allocNames.push(al.ag); });
+      if (allocNames.length) {
+        var wAl = '(' + allocNames.map(function(n) { return aF2 + '="' + String(n).replace(/"/g, '\\"') + '"'; }).join(' OR ') + ')' + (tbWhere ? ' AND ' + tbWhere : '');
+        var gotA = await ofglRows(idF, selB, yF2, fromYear, wAl), depA = depPick(gotA.rows, depC2);
+        addLog('ℹ️', 'OFGL (' + idF + ') : ' + gotA.rows.length + ' lignes d\'allocations lues (filtre : ' + gotA.where + '), champ département : ' + depA + '.');
+        var accA = accumulate(gotA.rows, depA, function(rr) { var ag = String(rr[aF2]); return { key: ag, label: ag, parent: '' }; });
+        ALLOC.forEach(function(al) {
+          var o = al.ag && accA[al.ag]; if (!o) { addLog('ℹ️', 'OFGL : agrégat « ' + al.key.toUpperCase() + ' » absent des données lues.'); return; }
+          var id = 'ofgl_alloc_' + al.key;
+          var e = ofglMakeMeta({ id: id, label: al.label + ' (par habitant)', unit: '€/hab.', fmt: 'eur0', themes: al.theme, map: o.h, techName: al.ag,
+            desc: 'Montant annuel des allocations ' + al.what + ' versées par le Département (budget principal, agrégat « ' + al.ag + ' » de l\'OFGL), rapporté à la population du département (euros par habitant). Calcul : somme des montants des comptes ÷ population (données OFGL).' });
+          if (e) { nbAg++; OFGL_ABS[id] = o.a; fnAbs['alloc_' + al.key] = { label: al.label, parent: '', abs: o.a, h: o.h }; }
+        });
+      } else addLog('⚠️', 'OFGL : aucun agrégat Allocations RSA / APA / PCH trouvé.');
+      // ---- B) Grandes politiques sociales (dépenses d'intervention par fonction) ----
+      var agInt = agVals.find(function(v) { return /^depenses d.intervention/.test(normFrCnsa(v)); });
+      var FN = [
+        { key: 'enfance', re: /famille|enfance/, label: 'Enfance et famille (aide sociale à l\'enfance)', theme: ['ase'] },
+        { key: 'ages', re: /personnes? agees?/, label: 'Personnes âgées', theme: ['ages'] },
+        { key: 'handicap', re: /personnes? handicapees?|handicap/, label: 'Personnes handicapées', theme: ['handicap'] },
+        { key: 'insertion', re: /insertion/, label: 'Insertion', theme: ['social'] },
+        { key: 'pmi', re: /protection maternelle|\bpmi\b|planification|prevention medico/, label: 'Protection maternelle et infantile, santé', theme: ['ase'] },
+        { key: 'total', re: /sante et action sociale/, label: 'Santé et action sociale (ensemble)', theme: ['social'] }
+      ];
+      var BAD = /autres?\b|hors |regularis|services? communs|frais communs/;
+      if (agInt && (f1 || f2c)) {
+        var wFn = aF2 + '="' + String(agInt).replace(/"/g, '\\"') + '"' + (tbWhere ? ' AND ' + tbWhere : '');
+        var gotF = await ofglRows(idF, selB, yF2, fromYear, wFn), depFn = depPick(gotF.rows, depC2);
+        addLog('ℹ️', 'OFGL (' + idF + ') : ' + gotF.rows.length + ' lignes lues (filtre : ' + gotF.where + '), champ département : ' + depFn + '.');
+        var accF = accumulate(gotF.rows, depFn, function(rr) {
+          var l1 = f1 ? rr[f1] : null, l2 = f2c ? rr[f2c] : null, lab = l2 || l1; if (!lab) return null;
+          return { key: (l1 || '') + '|' + lab, label: String(lab), parent: String(l1 || '') };
+        });
+        var keys = Object.keys(accF);
+        FN.forEach(function(fn) {
+          var cands = keys.filter(function(k) {
+            var o = accF[k], nl = normFrCnsa(o.label);
+            if (!fn.re.test(nl)) return false;
+            if (BAD.test(nl)) return false;
+            if (fn.key !== 'total' && /allocation|\brsa\b|\bapa\b|\bpch\b/.test(nl)) return false;
+            return Object.keys(o.h).length > 0;
+          });
+          cands.sort(function(x, y) {
+            var lx = Object.keys(accF[x].a).sort().pop(), ly = Object.keys(accF[y].a).sort().pop();
+            return ((accF[y].a[ly] || {})['11'] || 0) - ((accF[x].a[lx] || {})['11'] || 0);
+          });
+          if (!cands.length) { addLog('ℹ️', 'OFGL : aucune fonction « ' + fn.label + ' » trouvée.'); return; }
+          var o = accF[cands[0]], id = 'ofgl_fn_' + fn.key;
+          addLog('ℹ️', 'OFGL : « ' + fn.label + ' » ← fonction « ' + o.label + ' »' + (o.parent && o.parent !== o.label ? ' (' + o.parent + ')' : '') + (cands.length > 1 ? ' ; écartées : ' + cands.slice(1, 4).map(function(c) { return accF[c].label; }).join(' ; ') : '') + '.');
+          var e = ofglMakeMeta({ id: id, label: 'Dépenses d\'action sociale — ' + fn.label + ' (par habitant)', unit: '€/hab.', fmt: 'eur0', themes: fn.theme, map: o.h, techName: o.label,
+            desc: 'Dépenses d\'intervention du Département (aides et prestations versées, hors frais de personnel et de structure) pour la politique « ' + fn.label + ' » (fonction « ' + o.label + ' » de la nomenclature comptable), budget principal, rapportées à la population (euros par habitant). Calcul : montant des comptes ÷ population (données OFGL).' });
+          if (e) { nbFn++; OFGL_ABS[id] = o.a; }
+        });
+      } else addLog('⚠️', 'OFGL : agrégat « Dépenses d\'intervention » ou champs de fonction introuvables.');
+    } catch (eF) { addLog('⚠️', 'OFGL (dépenses sociales) : ' + eF.message + '.'); }
 
     // ---------- 3) Croisements dépenses × activité ----------
     var nbCross = 0;
     try { nbCross = await ofglCross(fnAbs); } catch (eC) { addLog('⚠️', 'OFGL (croisements) : ' + eC.message + '.'); }
-    addLog((nbAg + nbFn + nbCross) ? '✅' : '⚠️', 'OFGL : ' + (nbAg + nbFn + nbCross) + ' indicateur(s) chargé(s) (' + nbAg + ' agrégats, ' + nbFn + ' fonctions, ' + nbCross + ' croisements dépenses × activité).');
+    addLog((nbAg + nbFn + nbCross) ? '✅' : '⚠️', 'OFGL : ' + (nbAg + nbFn + nbCross) + ' indicateur(s) chargé(s) (' + nbAg + ' allocations, ' + nbFn + ' politiques sociales, ' + nbCross + ' croisements dépenses × activité).');
   } catch (e) {
     addLog('❌', 'OFGL erreur : ' + e.message);
   }
@@ -2580,23 +2605,16 @@ function hashShort(t) { var x = 0, s2 = normFrCnsa(String(t)); for (var i = 0; i
 
 // Ratios « dépense du Département ÷ activité » : même type de prestation, par département et par année
 var CROSS_DEFS = [
-  { key: 'rsa', fnRe: /\brsa\b|solidarite active|revenu minimum d.insertion/, caf: 'indfoy_rsa', cafLabel: 'foyers allocataires du RSA',
+  { key: 'rsa', fnKey: 'alloc_rsa', themes: ['social'], caf: 'indfoy_rsa', cafLabel: 'foyers allocataires du RSA',
     label: 'Dépense de RSA par foyer allocataire', compLabel: 'Dépenses de RSA du Département (€)', unit: '€/foyer', 
-    desc: 'Dépenses de RSA du Département (fonction « RSA » des comptes, OFGL) divisées par le nombre de foyers allocataires du RSA (CAF, dernier mois publié de l\'année). Mesure le coût moyen annuel supporté par le Département pour un foyer. Les foyers relevant de la MSA ne sont pas comptés, ce qui peut légèrement surestimer le ratio.' }
+    desc: 'Allocations RSA versées par le Département (agrégat « Allocations RSA » des comptes, OFGL) divisées par le nombre de foyers allocataires du RSA (CAF, dernier mois publié de l\'année). Mesure le coût moyen annuel supporté par le Département pour un foyer. Les foyers relevant de la MSA ne sont pas comptés, ce qui peut légèrement surestimer le ratio.' }
 ];
 async function ofglCross(fnAbs) {
-  var n = 0, ids = Object.keys(fnAbs);
+  var n = 0;
   for (var ci = 0; ci < CROSS_DEFS.length; ci++) {
     var cd = CROSS_DEFS[ci];
-    // fonction correspondante : parmi celles dont l'intitulé évoque la prestation, la plus dotée pour l'Aude
-    var cands = ids.filter(function(id) { return cd.fnRe.test(normFrCnsa(fnAbs[id].label + ' ' + fnAbs[id].parent)) && Object.keys(fnAbs[id].abs).length; });
-    cands.sort(function(a, b) {
-      var la = Object.keys(fnAbs[a].abs).sort().pop(), lb = Object.keys(fnAbs[b].abs).sort().pop();
-      return ((fnAbs[b].abs[lb] || {})['11'] || 0) - ((fnAbs[a].abs[la] || {})['11'] || 0);
-    });
-    if (!cands.length) { addLog('ℹ️', 'OFGL : aucune fonction « ' + cd.key.toUpperCase() + ' » trouvée parmi les ' + ids.length + ' fonctions lues — ratio ' + cd.label + ' non calculé.'); continue; }
-    var pick = fnAbs[cands[0]];
-    addLog('ℹ️', 'OFGL : fonction retenue pour « ' + cd.label + ' » → ' + pick.label + (pick.parent ? ' (' + pick.parent + ')' : '') + (cands.length > 1 ? ' ; autres candidates : ' + cands.slice(1, 4).map(function(c) { return fnAbs[c].label; }).join(' ; ') : '') + '.');
+    var pick = fnAbs[cd.fnKey];
+    if (!pick) { addLog('ℹ️', 'OFGL : dépenses « ' + cd.key.toUpperCase() + ' » non disponibles — ratio ' + cd.label + ' non calculé.'); continue; }
     var caf = await cafDeptByYear(cd.caf, 9);
     var yearsC = Object.keys(caf);
     if (!yearsC.length) { addLog('⚠️', 'OFGL : foyers CAF indisponibles pour le ratio ' + cd.label + '.'); continue; }
@@ -2606,9 +2624,9 @@ async function ofglCross(fnAbs) {
       Object.keys(pick.abs[y]).forEach(function(d) { var den = caf[y][d], num = pick.abs[y][d]; if (den > 0 && typeof num === 'number') (ratio[y] = ratio[y] || {})[d] = num / den; });
     });
     // composante « dépenses » (en euros, pour la superposition avec l'activité)
-    var comp = ofglMakeMeta({ id: 'ofgl_' + cd.key + '_depenses', label: cd.compLabel, unit: '€', fmt: 'eur0', themes: inferThemes({ label: pick.label + ' ' + pick.parent, techName: '', id: '' }).concat(['finances']), map: pick.abs, techName: pick.label,
+    var comp = ofglMakeMeta({ id: 'ofgl_' + cd.key + '_depenses', label: cd.compLabel, unit: '€', fmt: 'eur0', themes: cd.themes, map: pick.abs, techName: pick.label,
       desc: 'Dépenses totales du Département pour la fonction « ' + pick.label + ' » (montant en euros, comptes de l\'exercice). Calcul OFGL à partir des balances comptables DGFiP.' });
-    var e = ofglMakeMeta({ id: 'cross_' + cd.key + '_par_foyer', label: cd.label, unit: cd.unit, fmt: 'eur0', themes: inferThemes({ label: pick.label + ' ' + pick.parent, techName: '', id: '' }).concat(['finances']), map: ratio, techName: cd.key,
+    var e = ofglMakeMeta({ id: 'cross_' + cd.key + '_par_foyer', label: cd.label, unit: cd.unit, fmt: 'eur0', themes: cd.themes, map: ratio, techName: cd.key,
       source: 'OFGL × CAF — dépenses des comptes des départements rapportées à l\'activité', desc: cd.desc, overlayPair: ['ofgl_' + cd.key + '_depenses', 'caf_' + cd.caf] });
     if (comp) n++;
     if (e) { n++; addLog('ℹ️', 'OFGL × CAF : ' + cd.label + ' = ' + Math.round(e.aude).toLocaleString('fr-FR') + ' € (' + e.annee + '), rang ' + e.rank_fr + '/' + e.total_fr + ', ' + yearsC.length + ' année(s) de foyers CAF.'); }
