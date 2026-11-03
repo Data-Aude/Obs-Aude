@@ -814,6 +814,26 @@ function setThemeDash(thId) {
   renderDashCards();
 }
 
+// Indicateurs mis en avant par thème : les plus représentatifs d'abord (l'ordre de cette liste fixe la priorité) ; les autres sont sous « Voir plus »
+var DASH_LIMIT_ALL = 6, DASH_LIMIT_THEME = 12, DASH_EXPANDED = {};
+var KEY_PRIORITY = [
+  /population totale/, /part des (65|75|80)|60 ans et plus|plus de 60/, /moins de 20|0.?19 ans/,
+  /niveau de vie median|revenu median/, /taux de pauvrete/, /chomage/, /taux d.emploi/, /taux d.activite/,
+  /allocations? (rsa|apa|pch)|depense de rsa par foyer/, /\brsa\b/, /\bapa\b|allocation personnalisee/, /\bpch\b|compensation du handicap/, /\baah\b|adultes? handicapes?/,
+  /taux d.equipement|places? (en )?(ehpad|etablissement)/, /beneficiaires?/, /logements? vacants?|residences? principales?|proprietaires?|logements? sociaux|hlm/,
+  /sante et action sociale|aide sociale a l.enfance|enfance/, /mdph/
+];
+function rankByImportance(list) {
+  function score(m) {
+    var t = (String(m.label || '') + ' ' + String(m.id || '')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    for (var i = 0; i < KEY_PRIORITY.length; i++) if (KEY_PRIORITY[i].test(t)) return i;
+    return KEY_PRIORITY.length;
+  }
+  return list.map(function(m, i) { return { m: m, s: score(m), i: i }; })
+    .sort(function(a, b) { return a.s - b.s || a.i - b.i; })
+    .map(function(x) { return x.m; });
+}
+function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; renderDashCards(); }
 function renderDashCards() {
   function matchesTheme(m, thId) {
     if (!m.themes) return false;
@@ -843,11 +863,18 @@ function renderDashCards() {
     var thInfo = THEMES.find(function(t){return t.id===thId;}) || {lbl:thId, cls:'th-social'};
     html += '<div class="theme-section">';
     html += '<div class="theme-header ' + (thInfo.cls||'th-social') + '">' + thInfo.lbl + '</div>';
+    var list = rankByImportance(byTheme[thId]), lim = currentThemeDash === 'all' ? DASH_LIMIT_ALL : DASH_LIMIT_THEME;
+    var open = !!DASH_EXPANDED[thId] || list.length <= lim + 1;   // inutile de replier un seul indicateur
     html += '<div class="cards-grid">';
-    byTheme[thId].forEach(function(m) {
+    (open ? list : list.slice(0, lim)).forEach(function(m) {
       html += buildCard(m);
     });
-    html += '</div></div>';
+    html += '</div>';
+    if (list.length > lim + 1) {
+      html += '<div style="text-align:center;margin:10px 0 4px"><button class="theme-btn" onclick="toggleDashMore(\'' + thId + '\')">' +
+        (open ? '▲ Voir moins' : '▼ Voir plus (' + (list.length - lim) + ' autre' + (list.length - lim > 1 ? 's' : '') + ')') + '</button></div>';
+    }
+    html += '</div>';
   });
   
   if (!html) {
