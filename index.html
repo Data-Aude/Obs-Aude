@@ -751,6 +751,21 @@ function isPopDup(m) {
   if (/beneficiaire|allocataire|foyer|couvert|personnes? accompagnee|etablissement|place|depense|cout|montant/.test(t)) return false;
   return /^(population|nombre d.habitants|habitants|nb d.habitants|nb habitants|pop\.?)(\s|$|\()/.test(t);
 }
+// Masquages par motif (identifiant ou libellé) : codes CAF NDURAL / NDURHD / NDURINS, CNSA « article 43 » et « montants définitifs »
+function isHiddenByPattern(m) {
+  var t = (String(m.id || '') + ' ' + String(m.label || '') + ' ' + String(m.techName || '')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (/ndural|ndurhd|ndurins/.test(t)) return true;
+  if (/cnsa/.test(t + ' ' + String(m.source || '').toLowerCase()) && /article[ _-]?43|art[-_ ]?43|montants? definitifs?|montant_definitif|notification[-_ ]definitive/.test(t)) return true;
+  return false;
+}
+// Thème « Finances » en plus du thème de fond : tout indicateur dont le libellé parle de montant / dépenses, ou exprimé en euros (hors niveaux de vie et revenus)
+function addFinanceTheme(m) {
+  if (!m.themes) m.themes = [];
+  if (m.themes.indexOf('finances') >= 0) return;
+  var t = String(m.label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  var isEuro = String(m.unit || '').indexOf('€') >= 0;
+  if (/montant|depense|allocations? (rsa|apa|pch)/.test(t) || (isEuro && m.themes.indexOf('revenus') < 0)) m.themes = m.themes.concat(['finances']);
+}
 function rebuildAllMeta() {
   ALL_META = [];
   
@@ -775,14 +790,15 @@ function rebuildAllMeta() {
   if (typeof CNSA_META !== 'undefined') CNSA_META.forEach(function(m) { ALL_META.push(m); });
   
   // Retrait des indicateurs masqués
-  HIDDEN_METAS = ALL_META.filter(function(m) { return isHiddenInd(m.id); });
-  if (HIDDEN_METAS.length) ALL_META = ALL_META.filter(function(m) { return !isHiddenInd(m.id); });
+  HIDDEN_METAS = ALL_META.filter(function(m) { return isHiddenInd(m.id) || isHiddenByPattern(m); });
+  if (HIDDEN_METAS.length) ALL_META = ALL_META.filter(function(m) { return !(isHiddenInd(m.id) || isHiddenByPattern(m)); });
   // Doublons de population : seule la population de l'INSEE est conservée (CNSA, DREES, CAF… écartées)
   DUP_POP_METAS = ALL_META.filter(isPopDup);
   if (DUP_POP_METAS.length) { ALL_META = ALL_META.filter(function(m) { return !isPopDup(m); }); HIDDEN_METAS = HIDDEN_METAS.concat(DUP_POP_METAS); }
   ZERO_METAS = ALL_META.filter(isZeroAude);
   if (ZERO_METAS.length) ALL_META = ALL_META.filter(function(m) { return !isZeroAude(m); });
   ALL_META.forEach(normalizeMeta);
+  ALL_META.forEach(addFinanceTheme);
   var hb = document.getElementById('hidden-btn'); if (hb) hb.textContent = '🚫 Masqués (' + HIDDEN_METAS.length + ')';
 
   if (typeof DREES_SNAP !== 'undefined') {
@@ -3449,7 +3465,26 @@ async function loadINSEE() {
     }
     // Évaluation des formules : g(spec) lit une cellule (dimensions non précisées = total « _T »)
     var res = {};
-    function gOf(m) { return function(spec) { var key = dimNames.map(function(k) { return k + '=' + (spec[k] !== undefined ? spec[k] : '_T'); }).join('|'); return m[key] === undefined ? null : m[key]; }; }
+    // Dimension non précisée : « _T » (total) si elle existe, sinon son unique code (FREQ=A…), sinon le code par défaut de la config ; en dernier recours on essaie les autres codes (ex. RP_MEASURE)
+    var dflt = {}, free = [];
+    dimNames.forEach(function(k) {
+      var sv = seen[k] || [];
+      if (sv.indexOf('_T') < 0 && sv.length > 1) free.push(k);   // dimension sans total : plusieurs codes à essayer si la cellule n'est pas trouvée
+      if (cfg.defaults && cfg.defaults[k] !== undefined && sv.indexOf(cfg.defaults[k]) >= 0) dflt[k] = cfg.defaults[k];
+      else if (sv.indexOf('_T') >= 0) dflt[k] = '_T';
+      else dflt[k] = sv[0];
+    });
+    function gOf(m) {
+      return function(spec) {
+        function look(over) { return m[dimNames.map(function(k) { var x = spec[k] !== undefined ? spec[k] : (over && over[k] !== undefined ? over[k] : dflt[k]); return k + '=' + x; }).join('|')]; }
+        var v = look(null); if (v !== undefined) return v;
+        for (var a = 0; a < free.length; a++) {
+          if (spec[free[a]] !== undefined) continue;
+          for (var b = 0; b < seen[free[a]].length; b++) { var o = {}; o[free[a]] = seen[free[a]][b]; v = look(o); if (v !== undefined) return v; }
+        }
+        return null;
+      };
+    }
     if (built.check && cells[latestP] && cells[latestP]['11']) {
       var bad = built.check(gOf(cells[latestP]['11']));
       if (bad) { addLog('⚠️', tag + ' : ' + bad + ' — jeu ignoré (transmettez la ligne « dimensions → » ci-dessus).'); return 0; }
@@ -3489,7 +3524,20 @@ async function loadINSEE() {
   function pctOf(num, den) { return function(g) { var n = num(g), d = den(g); return (d && n !== null) ? n / d * 100 : null; }; }
 
   // --- Logement (recensement, exploitation principale) : catégories OCS (résidences principales / secondaires et occasionnels / vacants), type TDW (1 maison, 2 appartement)
+  // Libellés rédigés pour les codes que l'INSEE ne détaille pas dans ses métadonnées (null = code volontairement ignoré : tranche cumulative ou modalité ambiguë)
+  var LGT_OWN = {
+    'CARS:C0': 'dont le ménage n\'a pas de voiture', 'CARS:C1': 'dont le ménage a une voiture', 'CARS:C_GE2': 'dont le ménage a deux voitures ou plus', 'CARS:C_GE1': null,
+    'BUILD_END:Y_LT1919': 'construites avant 1919', 'BUILD_END:Y1919T1945': 'construites entre 1919 et 1945', 'BUILD_END:Y1946T1970': 'construites entre 1946 et 1970',
+    'BUILD_END:Y1971T1990': 'construites entre 1971 et 1990', 'BUILD_END:Y1991T2005': 'construites entre 1991 et 2005', 'BUILD_END:Y2006TAAAA': 'construites depuis 2006',
+    'BUILD_END:Y_LT1946': null, 'BUILD_END:Y1946T1990': null, 'BUILD_END:Y1991T2009': null, 'BUILD_END:Y_LT2010': null, 'BUILD_END:Y_LT2015': null, 'BUILD_END:Y_LT2021': null,
+    'NRG_SRC:ELC': 'chauffées à l\'électricité', 'NRG_SRC:OIL': 'chauffées au fioul', 'NRG_SRC:TOWN_GAS': 'chauffées au gaz de ville', 'NRG_SRC:BOT_GAS': 'chauffées au gaz en bouteille ou en citerne',
+    'NRG_SRC:OTH': 'chauffées avec une autre énergie', 'NRG_SRC:_Z': null,
+    'L_STAY:Y_LT2': 'dont le ménage est installé depuis moins de 2 ans', 'L_STAY:Y2T4': 'dont le ménage est installé depuis 2 à 4 ans', 'L_STAY:Y5T9': 'dont le ménage est installé depuis 5 à 9 ans',
+    'L_STAY:Y10T19': 'dont le ménage est installé depuis 10 à 19 ans', 'L_STAY:Y20T29': 'dont le ménage est installé depuis 20 à 29 ans', 'L_STAY:Y_GE30': 'dont le ménage est installé depuis 30 ans ou plus',
+    'NOR:R1': 'd\'une pièce', 'NOR:R2': 'de deux pièces', 'NOR:R3': 'de trois pièces', 'NOR:R4': 'de quatre pièces', 'NOR:R_GE5': 'de cinq pièces ou plus'
+  };
   var CFG_LOGEMENT = {
+    defaults: { RP_MEASURE: 'DWELLINGS' },
     ds: 'DS_RP_LOGEMENT_PRINC', source: 'INSEE — Recensement de la population, logement (API Melodi)', wantLabels: true,
     build: function(seen, labels) {
       var main = function(g) { return g({ OCS: 'DW_MAIN' }); };
@@ -3507,16 +3555,17 @@ async function loadINSEE() {
       var splits = [{ keep: ['OCS', 'TDW'], extra: '' }], notes = [], unresolved = [], nAuto = 0, nDims = 0;
       // Autres dimensions du jeu (statut d'occupation, ancienneté, nombre de pièces…) : parts parmi les résidences principales, si les codes ont un libellé officiel
       Object.keys(seen).filter(function(k) { return k !== 'OCS' && k !== 'TDW' && seen[k].indexOf('_T') >= 0; }).forEach(function(k) {
-        var useful = seen[k].filter(function(c) { return c !== '_T' && labels[c] && labels[c] !== c; });
-        seen[k].forEach(function(c) { if (c !== '_T' && !(labels[c] && labels[c] !== c)) unresolved.push(k + ':' + c); });
-        if (!useful.length || nDims >= 4) return;
+        var lab = function(c) { var ok2 = k + ':' + c; if (LGT_OWN[ok2] !== undefined) return LGT_OWN[ok2]; return (labels[c] && labels[c] !== c) ? labels[c] : null; };
+        var useful = seen[k].filter(function(c) { return c !== '_T' && lab(c); });
+        seen[k].forEach(function(c) { if (c !== '_T' && !lab(c) && LGT_OWN[k + ':' + c] === undefined) unresolved.push(k + ':' + c); });
+        if (!useful.length || nDims >= 6) return;
         nDims++;
         splits.push({ keep: ['OCS', k], extra: '&OCS=DW_MAIN', onlyLatest: true });
         useful.slice(0, 15).forEach(function(c) {
           if (nAuto >= 40) return; nAuto++;
-          defs.push({ id: 'insee_lgt_' + k.toLowerCase() + '_' + String(c).toLowerCase().replace(/[^a-z0-9]+/g, '_'), label: 'Part des résidences principales — ' + labels[c], unit: '%', fmt: 'pct1', themes: ['logement'],
+          defs.push({ id: 'insee_lgt_' + k.toLowerCase() + '_' + String(c).toLowerCase().replace(/[^a-z0-9]+/g, '_'), label: 'Part des résidences principales — ' + lab(c), unit: '%', fmt: 'pct1', themes: ['logement'],
             f: function(g) { var sp = { OCS: 'DW_MAIN' }; sp[k] = c; return pctOf(function(h) { return h(sp); }, main)(g); },
-            desc: 'Résidences principales correspondant à « ' + labels[c] + ' » (dimension ' + k + ' du recensement), rapportées à l\'ensemble des résidences principales. ' + D });
+            desc: 'Résidences principales correspondant à « ' + lab(c) + ' » (dimension ' + k + ' du recensement), rapportées à l\'ensemble des résidences principales. ' + D });
         });
       });
       if (nAuto) notes.push(nAuto + ' indicateur(s) supplémentaire(s) détecté(s) automatiquement (dimensions ' + Object.keys(seen).filter(function(k) { return k !== 'OCS' && k !== 'TDW'; }).join(', ') + ').');
@@ -3528,6 +3577,7 @@ async function loadINSEE() {
 
   // --- Emploi / chômage au sens du recensement (lieu de résidence) : EMPSTA_ENQ 1 = actifs occupés, 1T2 = actifs, _T = population
   var CFG_EMPLOI = {
+    defaults: { FREQ: 'A', RP_MEASURE: 'POP' },
     ds: 'DS_RP_EMPLOI_LR_PRINC', source: 'INSEE — Recensement de la population, emploi (API Melodi)', wantLabels: false,
     build: function(seen) {
       var E = function(a, sx) { return function(g) { return g({ AGE: a, SEX: sx, EMPSTA_ENQ: '1' }); }; };
