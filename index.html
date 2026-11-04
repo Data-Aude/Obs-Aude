@@ -817,6 +817,9 @@ function buildDash() {
   });
   html += '<button class="theme-btn" id="hidden-btn" style="margin-left:auto" onclick="openHiddenPanel()">🚫 Masqués (' + HIDDEN_METAS.length + ')</button>';
   html += '</div>';
+  html += '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0 12px">' +
+    '<input id="dash-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + dashQuery.replace(/"/g, '&quot;') + '" oninput="setDashQuery(this.value)" style="flex:1;min-width:240px;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit">' +
+    '<select id="dash-source" onchange="setDashSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff">' + sourceOptions(dashSource) + '</select></div>';
   html += '<div id="dash-cards"></div>';
   container.innerHTML = html;
   renderDashCards();
@@ -849,6 +852,23 @@ function rankByImportance(list) {
     .sort(function(a, b) { return a.s - b.s || a.i - b.i; })
     .map(function(x) { return x.m; });
 }
+var dashQuery = '', dashSource = '';
+function srcOf(m) { return String(m.source || '').split(' — ')[0].trim() || 'Autre'; }
+function sourceOptions(cur) {
+  var cnt = {}; ALL_META.forEach(function(m) { var k = srcOf(m); cnt[k] = (cnt[k] || 0) + 1; });
+  return '<option value="">Toutes les sources</option>' + Object.keys(cnt).sort().map(function(k) {
+    return '<option value="' + k.replace(/"/g, '&quot;') + '"' + (k === cur ? ' selected' : '') + '>' + k + ' (' + cnt[k] + ')</option>';
+  }).join('');
+}
+function matchesQuery(m, query, src) {
+  if (src && srcOf(m) !== src) return false;
+  var q = normTxt(query).split(/\s+/).filter(Boolean);
+  if (!q.length) return true;
+  var t = normTxt(m.label + ' ' + (m.source || '') + ' ' + (m.themes || []).join(' '));
+  return q.every(function(w) { return t.indexOf(w) >= 0; });
+}
+function setDashQuery(v) { dashQuery = v; renderDashCards(); }
+function setDashSource(v) { dashSource = v; renderDashCards(); }
 function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; renderDashCards(); }
 function renderDashCards() {
   function matchesTheme(m, thId) {
@@ -857,6 +877,8 @@ function renderDashCards() {
     return m.themes.indexOf(thId) >= 0;
   }
   var filtered = currentThemeDash === 'all' ? ALL_META : ALL_META.filter(function(m){ return matchesTheme(m, currentThemeDash); });
+  var filtering = !!(dashQuery.trim() || dashSource);
+  if (filtering) filtered = filtered.filter(function(m) { return matchesQuery(m, dashQuery, dashSource); });
   
   var byTheme = {};
   filtered.forEach(function(m) {
@@ -880,7 +902,7 @@ function renderDashCards() {
     html += '<div class="theme-section">';
     html += '<div class="theme-header ' + (thInfo.cls||'th-social') + '">' + thInfo.lbl + '</div>';
     var list = rankByImportance(byTheme[thId]), lim = currentThemeDash === 'all' ? DASH_LIMIT_ALL : DASH_LIMIT_THEME;
-    var open = !!DASH_EXPANDED[thId] || list.length <= lim + 1;   // inutile de replier un seul indicateur
+    var open = filtering || !!DASH_EXPANDED[thId] || list.length <= lim + 1;   // en recherche : tous les résultats   // inutile de replier un seul indicateur
     html += '<div class="cards-grid">';
     (open ? list : list.slice(0, lim)).forEach(function(m) {
       html += buildCard(m);
@@ -899,7 +921,7 @@ function renderDashCards() {
         '<p style="margin:10px 0 16px">Pour afficher les indicateurs, chargez les données officielles (INSEE, DREES, CAF, CNSA, Département). Cela prend quelques secondes.</p>' +
         '<button class="gen-pdf-btn" id="welcome-reload" onclick="reloadLive()">⚡ Recharger les données</button></div>';
     } else {
-      html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur pour ce thème</strong><p>Choisissez un autre thème.</p></div>';
+      html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur' + (filtering ? ' ne correspond à votre recherche' : ' pour ce thème') + '</strong><p>' + (filtering ? 'Modifiez les mots saisis, la source ou le thème.' : 'Choisissez un autre thème.') + '</p></div>';
     }
   }
   document.getElementById('dash-cards').innerHTML = html;
@@ -2019,7 +2041,7 @@ function buildNouveautes() {
 // ============================================================
 var exportTheme = 'all';
 var exportSel = {};
-var exportQuery = '';
+var exportQuery = '', exportSource = '';
 var exportTouched = false;   // tant que l'utilisateur n'a rien coché/décoché, la sélection = indicateurs de la page d'accueil
 var exportOpts = { synth: true, rank: true, evo: true, def: true }; // synth = tableau de statistiques sur la fiche de chaque indicateur
 
@@ -2037,11 +2059,13 @@ function exportInds() {
   var q = normTxt(exportQuery).split(/\s+/).filter(Boolean);
   return ALL_META.filter(function(m) {
     if (!(exportTheme === 'all' || (m.themes && m.themes.indexOf(exportTheme) >= 0))) return false;
+    if (exportSource && srcOf(m) !== exportSource) return false;
     if (!q.length) return true;
     var t = normTxt(m.label + ' ' + (m.source || '') + ' ' + (m.themes || []).join(' '));
     return q.every(function(w) { return t.indexOf(w) >= 0; });
   });
 }
+function setExportSource(v) { exportSource = v; renderExportList(); }
 function toggleExportTheme(id) { exportTheme = id; buildExport(); }
 function exportCount() { var c = document.getElementById('exp-count'); if (c) c.textContent = Object.keys(exportSel).filter(function(id) { return ALL_META.some(function(m) { return m.id === id; }); }).length; }
 function toggleExportInd(id, on) { exportTouched = true; if (on) exportSel[id] = true; else delete exportSel[id]; exportCount(); }
@@ -2076,7 +2100,8 @@ function buildExport() {
   el.innerHTML =
     '<h2 class="no-print" style="color:#1a4a6e;margin-bottom:14px">📄 Export PDF</h2>' +
     '<div class="exp-options no-print"><h4>1. Choisissez les indicateurs</h4><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' + themeBtns + '</div>' +
-    '<div style="margin-bottom:8px"><input id="exp-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + exportQuery.replace(/"/g, '&quot;') + '" oninput="setExportQuery(this.value)" style="width:100%;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit"></div>' +
+    '<div style="margin-bottom:8px"><input id="exp-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + exportQuery.replace(/"/g, '&quot;') + '" oninput="setExportQuery(this.value)" style="width:100%;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit"> ' +
+    '<select onchange="setExportSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff;margin-top:6px">' + sourceOptions(exportSource) + '</select></div>' +
     '<div style="margin-bottom:8px;font-size:12px"><a href="#" onclick="exportResetHome();return false"><b>↺ Indicateurs de la page d\'accueil</b></a> · <a href="#" onclick="exportSelectAll(true);return false">Tout cocher (liste affichée)</a> · <a href="#" onclick="exportSelectAll(false);return false">Tout décocher (liste affichée)</a> — <b id="exp-count">0</b> sélectionné(s) sur <span id="exp-nb">' + exportInds().length + '</span> affiché(s)</div>' +
     '<div id="exp-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 16px;max-height:260px;overflow-y:auto">' + list + '</div></div>' +
     '<div class="exp-options no-print"><h4>2. Contenu du rapport</h4>' +
