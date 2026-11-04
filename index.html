@@ -2019,14 +2019,43 @@ function buildNouveautes() {
 // ============================================================
 var exportTheme = 'all';
 var exportSel = {};
+var exportQuery = '';
+var exportTouched = false;   // tant que l'utilisateur n'a rien coché/décoché, la sélection = indicateurs de la page d'accueil
 var exportOpts = { synth: true, rank: true, evo: true, def: true }; // synth = tableau de statistiques sur la fiche de chaque indicateur
 
+function normTxt(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+// Indicateurs affichés sur la page d'accueil (vue « Tous » : les plus importants de chaque thème)
+function homeIndicators() {
+  var by = {};
+  ALL_META.forEach(function(m) { var t0 = (m.themes && m.themes[0]) || 'autre'; if (t0 === 'jeunesse') t0 = 'ase'; (by[t0] = by[t0] || []).push(m); });
+  var out = [];
+  Object.keys(by).forEach(function(th) { var l = rankByImportance(by[th]); out = out.concat(l.length <= DASH_LIMIT_ALL + 1 ? l : l.slice(0, DASH_LIMIT_ALL)); });
+  return out;
+}
+function exportResetHome() { exportSel = {}; homeIndicators().forEach(function(m) { exportSel[m.id] = true; }); exportTouched = false; buildExport(); }
 function exportInds() {
-  return ALL_META.filter(function(m) { return exportTheme === 'all' || (m.themes && m.themes.indexOf(exportTheme) >= 0); });
+  var q = normTxt(exportQuery).split(/\s+/).filter(Boolean);
+  return ALL_META.filter(function(m) {
+    if (!(exportTheme === 'all' || (m.themes && m.themes.indexOf(exportTheme) >= 0))) return false;
+    if (!q.length) return true;
+    var t = normTxt(m.label + ' ' + (m.source || '') + ' ' + (m.themes || []).join(' '));
+    return q.every(function(w) { return t.indexOf(w) >= 0; });
+  });
 }
 function toggleExportTheme(id) { exportTheme = id; buildExport(); }
-function toggleExportInd(id, on) { if (on) exportSel[id] = true; else delete exportSel[id]; var c = document.getElementById('exp-count'); if (c) c.textContent = Object.keys(exportSel).length; }
-function exportSelectAll(on) { exportInds().forEach(function(m) { if (on) exportSel[m.id] = true; else delete exportSel[m.id]; }); buildExport(); }
+function exportCount() { var c = document.getElementById('exp-count'); if (c) c.textContent = Object.keys(exportSel).filter(function(id) { return ALL_META.some(function(m) { return m.id === id; }); }).length; }
+function toggleExportInd(id, on) { exportTouched = true; if (on) exportSel[id] = true; else delete exportSel[id]; exportCount(); }
+function exportSelectAll(on) { exportTouched = true; exportInds().forEach(function(m) { if (on) exportSel[m.id] = true; else delete exportSel[m.id]; }); renderExportList(); }
+function exportList() {
+  var l = exportInds();
+  if (!l.length) return '<div style="color:#889;font-size:12px;padding:8px">Aucun indicateur ne correspond à « ' + exportQuery.replace(/</g, '&lt;') + ' ».</div>';
+  return l.map(function(m) {
+    return '<label class="exp-opt-row" style="cursor:pointer"><input type="checkbox" ' + (exportSel[m.id] ? 'checked ' : '') + 'onchange="toggleExportInd(\'' + m.id + '\', this.checked)"> ' + m.label +
+      ' <span style="color:#9ab;font-size:10px">(' + (m.source ? m.source.split(' — ')[0] : '') + ')</span></label>';
+  }).join('');
+}
+function renderExportList() { var el = document.getElementById('exp-list'); if (el) el.innerHTML = exportList(); var n = document.getElementById('exp-nb'); if (n) n.textContent = exportInds().length; exportCount(); }
+function setExportQuery(v) { exportQuery = v; renderExportList(); }
 function setExportOpt(k, on) { exportOpts[k] = on; }
 
 function buildExport() {
@@ -2040,17 +2069,16 @@ function buildExport() {
   var themeBtns = THEMES.map(function(t) {
     return '<button class="exp-theme-btn' + (exportTheme === t.id ? ' on' : '') + '" onclick="toggleExportTheme(\'' + t.id + '\')">' + t.lbl + '</button>';
   }).join(' ');
-  var list = exportInds().map(function(m) {
-    return '<label class="exp-opt-row" style="cursor:pointer"><input type="checkbox" ' + (exportSel[m.id] ? 'checked ' : '') + 'onchange="toggleExportInd(\'' + m.id + '\', this.checked)"> ' + m.label +
-      ' <span style="color:#9ab;font-size:10px">(' + (m.source ? m.source.split(' — ')[0] : '') + ')</span></label>';
-  }).join('');
+  if (!exportTouched) { exportSel = {}; homeIndicators().forEach(function(m) { exportSel[m.id] = true; }); }
+  var list = exportList();
   function opt(k, txt) { return '<label class="exp-opt-row" style="cursor:pointer"><input type="checkbox" ' + (exportOpts[k] ? 'checked ' : '') + 'onchange="setExportOpt(\'' + k + '\', this.checked)"> ' + txt + '</label>'; }
 
   el.innerHTML =
     '<h2 class="no-print" style="color:#1a4a6e;margin-bottom:14px">📄 Export PDF</h2>' +
     '<div class="exp-options no-print"><h4>1. Choisissez les indicateurs</h4><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">' + themeBtns + '</div>' +
-    '<div style="margin-bottom:8px;font-size:12px"><a href="#" onclick="exportSelectAll(true);return false">Tout cocher</a> · <a href="#" onclick="exportSelectAll(false);return false">Tout décocher</a> — <b id="exp-count">' + Object.keys(exportSel).length + '</b> sélectionné(s)</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 16px;max-height:260px;overflow-y:auto">' + list + '</div></div>' +
+    '<div style="margin-bottom:8px"><input id="exp-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + exportQuery.replace(/"/g, '&quot;') + '" oninput="setExportQuery(this.value)" style="width:100%;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit"></div>' +
+    '<div style="margin-bottom:8px;font-size:12px"><a href="#" onclick="exportResetHome();return false"><b>↺ Indicateurs de la page d\'accueil</b></a> · <a href="#" onclick="exportSelectAll(true);return false">Tout cocher (liste affichée)</a> · <a href="#" onclick="exportSelectAll(false);return false">Tout décocher (liste affichée)</a> — <b id="exp-count">0</b> sélectionné(s) sur <span id="exp-nb">' + exportInds().length + '</span> affiché(s)</div>' +
+    '<div id="exp-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 16px;max-height:260px;overflow-y:auto">' + list + '</div></div>' +
     '<div class="exp-options no-print"><h4>2. Contenu du rapport</h4>' +
     opt('synth', 'Statistiques comparatives de l\'indicateur (moyenne, médiane, quartiles, rang — strate, Occitanie, France)') +
     opt('rank', 'Graphique : classement de l\'Aude parmi les départements de sa strate') +
@@ -2061,6 +2089,7 @@ function buildExport() {
     '<span><button onclick="window.print()" style="background:#ED7D31;border:none;color:#fff;cursor:pointer;font-size:11px;padding:5px 10px;border-radius:4px;margin-right:8px">🖨️ Imprimer / Enregistrer en PDF</button>' +
     '<button onclick="document.getElementById(\'pdf-preview-wrap\').classList.remove(\'on\')" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px">✕</button></span></div>' +
     '<div id="pdf-preview-body"></div></div>';
+  exportCount();
 }
 
 // Graphique : l'Aude parmi les départements de sa strate (barres horizontales, Aude en orange)
