@@ -25,6 +25,16 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .section.on{display:block}
 /* DASHBOARD */
 #dash .theme-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.dash-layout{display:grid;grid-template-columns:240px 1fr;gap:18px;align-items:start}
+.dash-side{position:sticky;top:8px;background:#fff;border:1px solid #d0e2f0;border-radius:10px;padding:12px 12px 10px;box-shadow:0 1px 4px rgba(0,0,0,.07);max-height:calc(100vh - 24px);overflow-y:auto}
+.dash-side h3{margin:0 0 8px;font-size:12px;color:#1a4a6e;text-transform:uppercase;letter-spacing:.08em}
+.dash-th{display:flex;align-items:center;gap:8px;padding:6px 8px;margin:2px 0;border-radius:6px;font-size:13px;color:#2a4560;cursor:pointer;border:1px solid transparent}
+.dash-th:hover{background:#eef5fb}
+.dash-th.on{background:#fff3e8;border-color:#f3c29b;font-weight:600}
+.dash-th input{accent-color:#ED7D31;width:16px;height:16px;cursor:pointer;flex:none}
+.dash-th .n{margin-left:auto;font-size:11px;color:#8aa0b5;font-weight:400}
+.dash-side .lnk{font-size:11px;margin:6px 2px 0;display:flex;justify-content:space-between}
+@media(max-width:820px){.dash-layout{grid-template-columns:1fr}.dash-side{position:static;max-height:none}}
 .theme-btn{background:#fff;border:1px solid #c5d8ea;color:#4a6a8a;padding:5px 12px;border-radius:20px;cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .theme-btn:hover{background:#e8f2fa;color:#1a4a6e;border-color:#8ab0cc}
 .theme-btn.on{background:#ED7D31;border-color:#ED7D31;color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(237,125,49,.3)}
@@ -808,33 +818,70 @@ function rebuildAllMeta() {
   }
 }
 
+// Thématiques cochées (plusieurs possibles) : seules les thématiques cochées s'affichent sur la page d'accueil
+var dashThemes = {}, dashThemesInit = false;
+function themeMatches(m, thId) {
+  if (!m.themes) return false;
+  if (thId === 'ase') return m.themes.indexOf('ase') >= 0 || m.themes.indexOf('jeunesse') >= 0;
+  return m.themes.indexOf(thId) >= 0;
+}
+function dashCounts() { var c = {}; THEMES.forEach(function(t) { if (t.id !== 'all') c[t.id] = ALL_META.filter(function(m) { return themeMatches(m, t.id); }).length; }); return c; }
+function dashEnsureInit() {
+  if (dashThemesInit || !ALL_META.length) return;
+  var c = dashCounts(), first = THEMES.filter(function(t) { return t.id !== 'all' && c[t.id] > 0; })[0];
+  if (first) dashThemes[first.id] = true;   // au premier chargement : une seule thématique, pour que la page tienne à l'écran
+  dashThemesInit = true;
+}
 function buildDash() {
   var container = document.getElementById('dash');
-  
-  var html = '<div class="theme-bar">';
+  dashEnsureInit();
+  var counts = dashCounts(), nb = Object.keys(dashThemes).filter(function(k) { return dashThemes[k]; }).length;
+  var side = '<div class="dash-side"><h3>Thématiques à afficher</h3>';
   THEMES.forEach(function(th) {
-    html += '<button class="theme-btn'+(th.id===currentThemeDash?' on':'')+'" data-theme-id="'+th.id+'" onclick="setThemeDash(this.dataset.themeId)">' + th.lbl + '</button>';
+    if (th.id === 'all' || !counts[th.id]) return;
+    side += '<label class="dash-th' + (dashThemes[th.id] ? ' on' : '') + '"><input type="checkbox" data-theme-id="' + th.id + '"' + (dashThemes[th.id] ? ' checked' : '') + ' onchange="toggleDashTheme(this.dataset.themeId, this.checked)"> ' + th.lbl + '<span class="n">' + counts[th.id] + '</span></label>';
   });
-  html += '<button class="theme-btn" id="hidden-btn" style="margin-left:auto" onclick="openHiddenPanel()">🚫 Masqués (' + HIDDEN_METAS.length + ')</button>';
-  html += '</div>';
-  html += '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0 12px">' +
-    '<input id="dash-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + dashQuery.replace(/"/g, '&quot;') + '" oninput="setDashQuery(this.value)" style="flex:1;min-width:240px;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit">' +
-    '<select id="dash-source" onchange="setDashSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff">' + sourceOptions(dashSource) + '</select></div>';
-  html += '<div id="dash-cards"></div>';
-  container.innerHTML = html;
+  side += '<div class="lnk"><a href="#" onclick="dashAllThemes(true);return false">Tout cocher</a><a href="#" onclick="dashAllThemes(false);return false">Tout décocher</a></div>' +
+    '<div style="margin-top:10px"><button class="theme-btn" id="hidden-btn" onclick="openHiddenPanel()">🚫 Masqués (' + HIDDEN_METAS.length + ')</button></div></div>';
+  var main = '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px">' +
+    '<input id="dash-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + dashQuery.replace(/"/g, '&quot;') + '" oninput="setDashQuery(this.value)" style="flex:1;min-width:220px;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit">' +
+    '<select id="dash-source" onchange="setDashSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff">' + sourceOptions(dashSource) + '</select></div>' +
+    '<div id="dash-cards"></div>';
+  container.innerHTML = '<div class="dash-layout">' + side + '<div>' + main + '</div></div>';
   renderDashCards();
 }
-
-function setThemeDash(thId) {
-  currentThemeDash = thId;
-  document.querySelectorAll('#dash .theme-btn').forEach(function(b){
-    b.classList.toggle('on', b.dataset.themeId === thId);
-  });
+function toggleDashTheme(thId, on) {
+  dashThemes[thId] = !!on; dashThemesInit = true;
+  var cb = document.querySelector('#dash input[data-theme-id="' + thId + '"]'); if (cb && cb.parentNode) cb.parentNode.classList.toggle('on', !!on);
   renderDashCards();
+}
+function dashAllThemes(on) {
+  dashThemesInit = true; var c = dashCounts();
+  THEMES.forEach(function(t) { if (t.id !== 'all' && c[t.id]) dashThemes[t.id] = !!on; });
+  buildDash();
+}
+// Regroupe les indicateurs par thématique cochée (chaque indicateur n'apparaît qu'une fois, sous son thème principal s'il est coché) ; en recherche, tous les thèmes sont parcourus
+function dashGroups(ignoreFilter) {
+  dashEnsureInit();
+  var filtering = !ignoreFilter && !!(dashQuery.trim() || dashSource), by = {};
+  ALL_META.forEach(function(m) {
+    if (filtering && !matchesQuery(m, dashQuery, dashSource)) return;
+    var ths = (m.themes || []).map(function(t) { return t === 'jeunesse' ? 'ase' : t; }); if (!ths.length) ths = ['autre'];
+    var pick = filtering ? ths[0] : ths.filter(function(t) { return dashThemes[t]; })[0];
+    if (!pick) return;
+    (by[pick] = by[pick] || []).push(m);
+  });
+  return by;
+}
+function dashShown(thId, list, filtering) {
+  var nbChecked = Object.keys(dashThemes).filter(function(k) { return dashThemes[k]; }).length;
+  var lim = nbChecked <= 1 ? DASH_LIMIT_THEME : DASH_LIMIT_ALL;
+  var open = filtering || !!DASH_EXPANDED[thId] || list.length <= lim + 1;
+  return { items: open ? list : list.slice(0, lim), open: open, lim: lim };
 }
 
 // Indicateurs mis en avant par thème : les plus représentatifs d'abord (l'ordre de cette liste fixe la priorité) ; les autres sont sous « Voir plus »
-var DASH_LIMIT_ALL = 6, DASH_LIMIT_THEME = 12, DASH_EXPANDED = {};
+var DASH_LIMIT_ALL = 6, DASH_LIMIT_THEME = 8, DASH_EXPANDED = {};
 var KEY_PRIORITY = [
   /population totale/, /part des (65|75|80)|60 ans et plus|plus de 60/, /moins de 20|0.?19 ans/,
   /niveau de vie median|revenu median/, /taux de pauvrete/, /chomage/, /taux d.emploi/, /taux d.activite/,
@@ -871,57 +918,33 @@ function setDashQuery(v) { dashQuery = v; renderDashCards(); }
 function setDashSource(v) { dashSource = v; renderDashCards(); }
 function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; renderDashCards(); }
 function renderDashCards() {
-  function matchesTheme(m, thId) {
-    if (!m.themes) return false;
-    if (thId === 'ase') return m.themes.indexOf('ase') >= 0 || m.themes.indexOf('jeunesse') >= 0;
-    return m.themes.indexOf(thId) >= 0;
-  }
-  var filtered = currentThemeDash === 'all' ? ALL_META : ALL_META.filter(function(m){ return matchesTheme(m, currentThemeDash); });
   var filtering = !!(dashQuery.trim() || dashSource);
-  if (filtering) filtered = filtered.filter(function(m) { return matchesQuery(m, dashQuery, dashSource); });
-  
-  var byTheme = {};
-  filtered.forEach(function(m) {
-    var th;
-    if (currentThemeDash !== 'all' && matchesTheme(m, currentThemeDash)) {
-      th = currentThemeDash;
-    } else {
-      var t0 = (m.themes && m.themes[0]) || 'autre';
-      th = t0 === 'jeunesse' ? 'ase' : t0;
-    }
-    if (!byTheme[th]) byTheme[th] = [];
-    byTheme[th].push(m);
-  });
-  
+  var byTheme = dashGroups(false);
   var themeOrder = ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
   var html = '';
-  
+  if (filtering) html += '<div style="font-size:12px;color:#667;margin:0 0 8px">Résultats de la recherche dans toutes les thématiques (' + Object.keys(byTheme).reduce(function(n, k) { return n + byTheme[k].length; }, 0) + ')</div>';
   themeOrder.forEach(function(thId) {
     if (!byTheme[thId] || byTheme[thId].length === 0) return;
     var thInfo = THEMES.find(function(t){return t.id===thId;}) || {lbl:thId, cls:'th-social'};
     html += '<div class="theme-section">';
     html += '<div class="theme-header ' + (thInfo.cls||'th-social') + '">' + thInfo.lbl + '</div>';
-    var list = rankByImportance(byTheme[thId]), lim = currentThemeDash === 'all' ? DASH_LIMIT_ALL : DASH_LIMIT_THEME;
-    var open = filtering || !!DASH_EXPANDED[thId] || list.length <= lim + 1;   // en recherche : tous les résultats   // inutile de replier un seul indicateur
+    var list = rankByImportance(byTheme[thId]), sh = dashShown(thId, list, filtering);
     html += '<div class="cards-grid">';
-    (open ? list : list.slice(0, lim)).forEach(function(m) {
-      html += buildCard(m);
-    });
+    sh.items.forEach(function(m) { html += buildCard(m); });
     html += '</div>';
-    if (list.length > lim + 1) {
+    if (list.length > sh.lim + 1 && !filtering) {
       html += '<div style="text-align:center;margin:10px 0 4px"><button class="theme-btn" onclick="toggleDashMore(\'' + thId + '\')">' +
-        (open ? '▲ Voir moins' : '▼ Voir plus (' + (list.length - lim) + ' autre' + (list.length - lim > 1 ? 's' : '') + ')') + '</button></div>';
+        (sh.open ? '▲ Voir moins' : '▼ Voir plus (' + (list.length - sh.lim) + ' autre' + (list.length - sh.lim > 1 ? 's' : '') + ')') + '</button></div>';
     }
     html += '</div>';
   });
-  
   if (!html) {
     if (!ALL_META.length) {
       html = '<div class="msg welcome"><div class="ico">📊</div><strong style="font-size:18px">Bienvenue sur l\'Observatoire social de l\'Aude</strong>' +
         '<p style="margin:10px 0 16px">Pour afficher les indicateurs, chargez les données officielles (INSEE, DREES, CAF, CNSA, Département). Cela prend quelques secondes.</p>' +
         '<button class="gen-pdf-btn" id="welcome-reload" onclick="reloadLive()">⚡ Recharger les données</button></div>';
     } else {
-      html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur' + (filtering ? ' ne correspond à votre recherche' : ' pour ce thème') + '</strong><p>' + (filtering ? 'Modifiez les mots saisis, la source ou le thème.' : 'Choisissez un autre thème.') + '</p></div>';
+      html = '<div class="msg"><div class="ico">' + (filtering ? '🔍' : '☑️') + '</div><strong>' + (filtering ? 'Aucun indicateur ne correspond à votre recherche' : 'Aucune thématique cochée') + '</strong><p>' + (filtering ? 'Modifiez les mots saisis ou la source.' : 'Cochez une ou plusieurs thématiques dans le panneau de gauche pour afficher leurs indicateurs.') + '</p></div>';
     }
   }
   document.getElementById('dash-cards').innerHTML = html;
@@ -2048,10 +2071,8 @@ var exportOpts = { synth: true, rank: true, evo: true, def: true }; // synth = t
 function normTxt(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 // Indicateurs affichés sur la page d'accueil (vue « Tous » : les plus importants de chaque thème)
 function homeIndicators() {
-  var by = {};
-  ALL_META.forEach(function(m) { var t0 = (m.themes && m.themes[0]) || 'autre'; if (t0 === 'jeunesse') t0 = 'ase'; (by[t0] = by[t0] || []).push(m); });
-  var out = [];
-  Object.keys(by).forEach(function(th) { var l = rankByImportance(by[th]); out = out.concat(l.length <= DASH_LIMIT_ALL + 1 ? l : l.slice(0, DASH_LIMIT_ALL)); });
+  var by = dashGroups(true), out = [];
+  Object.keys(by).forEach(function(th) { out = out.concat(dashShown(th, rankByImportance(by[th]), false).items); });
   return out;
 }
 function exportResetHome() { exportSel = {}; homeIndicators().forEach(function(m) { exportSel[m.id] = true; }); exportTouched = false; buildExport(); }
