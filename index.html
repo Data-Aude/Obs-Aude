@@ -25,26 +25,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .section.on{display:block}
 /* DASHBOARD */
 #dash .theme-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
-.theme-chip{background:#fff;border:1px solid #c5d8ea;color:#4a6a8a;padding:6px 12px;border-radius:20px;cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,.06);display:inline-flex;align-items:center;gap:7px;user-select:none}
-.theme-chip:hover{background:#e8f2fa;border-color:#8ab0cc}
-.theme-chip input{accent-color:#ED7D31;width:15px;height:15px;cursor:pointer;margin:0}
-.theme-chip.on{background:#fff3e8;border-color:#ED7D31;color:#8a3d05;font-weight:600}
-.theme-chip .n{font-size:10px;color:#8aa0b5;font-weight:400}
-.theme-header.clickable{cursor:pointer}
-.theme-header .hint{float:right;font-weight:400;text-transform:none;letter-spacing:0;opacity:.85}
-.cards-grid.mini-grid{grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:6px}
-.card.mini{padding:7px 9px;border-radius:6px}
-.card.mini:hover{transform:none}
-.mini-label{font-size:10.5px;color:#5a7a9a;line-height:1.25;height:2.5em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-.mini-row{display:flex;justify-content:space-between;align-items:center;gap:4px;margin-top:3px}
-.mini-val{font-size:15px;font-weight:700;color:#1a2845;white-space:nowrap}
-.card.full{padding:14px}
-.card-def{font-size:11px;color:#5a6a7a;line-height:1.4;margin:6px 0 8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.card-cmp{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:6px}
-.card-cmp th{font-weight:600;color:#8aaabb;font-size:9px;text-align:right;padding:1px 3px}
-.card-cmp td{padding:2px 3px;text-align:right;color:#3a5a7a;border-top:1px solid #edf2f7}
-.card-cmp td:first-child,.card-cmp th:first-child{text-align:left;color:#6a8aa0}
-.card-spark{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:10px;color:#6a8aa0}
 .theme-btn{background:#fff;border:1px solid #c5d8ea;color:#4a6a8a;padding:5px 12px;border-radius:20px;cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .theme-btn:hover{background:#e8f2fa;color:#1a4a6e;border-color:#8ab0cc}
 .theme-btn.on{background:#ED7D31;border-color:#ED7D31;color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(237,125,49,.3)}
@@ -828,60 +808,33 @@ function rebuildAllMeta() {
   }
 }
 
-// Thématiques cochées (plusieurs possibles) : elles s'affichent en cartes détaillées ; les autres restent en petites vignettes
-var dashThemes = {}, dashThemesInit = false;
-function themeMatches(m, thId) {
-  if (!m.themes) return false;
-  if (thId === 'ase') return m.themes.indexOf('ase') >= 0 || m.themes.indexOf('jeunesse') >= 0;
-  return m.themes.indexOf(thId) >= 0;
-}
-function dashCounts() { var c = {}; THEMES.forEach(function(t) { if (t.id !== 'all') c[t.id] = ALL_META.filter(function(m) { return themeMatches(m, t.id); }).length; }); return c; }
-function dashEnsureInit() { dashThemesInit = true; }
-function dashNbChecked() { return Object.keys(dashThemes).filter(function(k) { return dashThemes[k]; }).length; }
 function buildDash() {
   var container = document.getElementById('dash');
-  var counts = dashCounts();
+  
   var html = '<div class="theme-bar">';
   THEMES.forEach(function(th) {
-    if (th.id === 'all') return;
-    if (!counts[th.id]) return;
-    html += '<label class="theme-chip' + (dashThemes[th.id] ? ' on' : '') + '"><input type="checkbox" data-theme-id="' + th.id + '"' + (dashThemes[th.id] ? ' checked' : '') + ' onchange="toggleDashTheme(this.dataset.themeId, this.checked)">' + th.lbl + ' <span class="n">' + counts[th.id] + '</span></label>';
+    html += '<button class="theme-btn'+(th.id===currentThemeDash?' on':'')+'" data-theme-id="'+th.id+'" onclick="setThemeDash(this.dataset.themeId)">' + th.lbl + '</button>';
   });
-  html += '<button class="theme-btn" onclick="dashAllThemes(true)">Tout détailler</button><button class="theme-btn" onclick="dashAllThemes(false)">Tout réduire</button>';
   html += '<button class="theme-btn" id="hidden-btn" style="margin-left:auto" onclick="openHiddenPanel()">🚫 Masqués (' + HIDDEN_METAS.length + ')</button>';
   html += '</div>';
   html += '<div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0 12px">' +
     '<input id="dash-search" type="search" placeholder="🔍 Rechercher un indicateur (ex. RSA, chômage, APA, logement…)" value="' + dashQuery.replace(/"/g, '&quot;') + '" oninput="setDashQuery(this.value)" style="flex:1;min-width:240px;max-width:520px;padding:8px 12px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit">' +
-    '<select id="dash-source" onchange="setDashSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff">' + sourceOptions(dashSource) + '</select>' +
-    '<span style="font-size:11px;color:#8aa0b5">Cochez une thématique pour afficher ses indicateurs en détail (définition, moyennes, rangs, évolution).</span></div>';
+    '<select id="dash-source" onchange="setDashSource(this.value)" style="padding:8px 10px;border:1px solid #b9cbe0;border-radius:6px;font-size:13px;font-family:inherit;background:#fff">' + sourceOptions(dashSource) + '</select></div>';
   html += '<div id="dash-cards"></div>';
   container.innerHTML = html;
   renderDashCards();
 }
-function toggleDashTheme(thId, on) {
-  dashThemes[thId] = !!on;
-  var cb = document.querySelector('#dash input[data-theme-id="' + thId + '"]'); if (cb && cb.parentNode) cb.parentNode.classList.toggle('on', !!on);
-  renderDashCards();
-}
-function dashAllThemes(on) {
-  var c = dashCounts();
-  THEMES.forEach(function(t) { if (t.id !== 'all' && c[t.id]) dashThemes[t.id] = !!on; });
-  buildDash();
-}
-// Regroupe tous les indicateurs par thématique (un indicateur n'apparaît qu'une fois : sous une thématique cochée s'il y en a une, sinon sous son thème principal)
-function dashGroups(ignoreFilter) {
-  var filtering = !ignoreFilter && !!(dashQuery.trim() || dashSource), by = {};
-  ALL_META.forEach(function(m) {
-    if (filtering && !matchesQuery(m, dashQuery, dashSource)) return;
-    var ths = (m.themes || []).map(function(t) { return t === 'jeunesse' ? 'ase' : t; }); if (!ths.length) ths = ['autre'];
-    var pick = ths.filter(function(t) { return dashThemes[t]; })[0] || ths[0];
-    (by[pick] = by[pick] || []).push(m);
+
+function setThemeDash(thId) {
+  currentThemeDash = thId;
+  document.querySelectorAll('#dash .theme-btn').forEach(function(b){
+    b.classList.toggle('on', b.dataset.themeId === thId);
   });
-  return by;
+  renderDashCards();
 }
 
 // Indicateurs mis en avant par thème : les plus représentatifs d'abord (l'ordre de cette liste fixe la priorité) ; les autres sont sous « Voir plus »
-var DASH_LIMIT_ALL = 6, DASH_LIMIT_THEME = 8, DASH_EXPANDED = {};
+var DASH_LIMIT_ALL = 6, DASH_LIMIT_THEME = 12, DASH_EXPANDED = {};
 var KEY_PRIORITY = [
   /population totale/, /part des (65|75|80)|60 ans et plus|plus de 60/, /moins de 20|0.?19 ans/,
   /niveau de vie median|revenu median/, /taux de pauvrete/, /chomage/, /taux d.emploi/, /taux d.activite/,
@@ -916,34 +869,59 @@ function matchesQuery(m, query, src) {
 }
 function setDashQuery(v) { dashQuery = v; renderDashCards(); }
 function setDashSource(v) { dashSource = v; renderDashCards(); }
-function toggleDashThemeAndBuild(thId) { dashThemes[thId] = !dashThemes[thId]; buildDash(); }
 function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; renderDashCards(); }
 function renderDashCards() {
+  function matchesTheme(m, thId) {
+    if (!m.themes) return false;
+    if (thId === 'ase') return m.themes.indexOf('ase') >= 0 || m.themes.indexOf('jeunesse') >= 0;
+    return m.themes.indexOf(thId) >= 0;
+  }
+  var filtered = currentThemeDash === 'all' ? ALL_META : ALL_META.filter(function(m){ return matchesTheme(m, currentThemeDash); });
   var filtering = !!(dashQuery.trim() || dashSource);
-  var byTheme = dashGroups(false);
+  if (filtering) filtered = filtered.filter(function(m) { return matchesQuery(m, dashQuery, dashSource); });
+  
+  var byTheme = {};
+  filtered.forEach(function(m) {
+    var th;
+    if (currentThemeDash !== 'all' && matchesTheme(m, currentThemeDash)) {
+      th = currentThemeDash;
+    } else {
+      var t0 = (m.themes && m.themes[0]) || 'autre';
+      th = t0 === 'jeunesse' ? 'ase' : t0;
+    }
+    if (!byTheme[th]) byTheme[th] = [];
+    byTheme[th].push(m);
+  });
+  
   var themeOrder = ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
-  // thématiques cochées d'abord (cartes détaillées), les autres ensuite (petites vignettes)
-  var order = themeOrder.filter(function(t) { return dashThemes[t]; }).concat(themeOrder.filter(function(t) { return !dashThemes[t]; }));
   var html = '';
-  if (filtering) html += '<div style="font-size:12px;color:#667;margin:0 0 8px">Résultats de la recherche : ' + Object.keys(byTheme).reduce(function(n, k) { return n + byTheme[k].length; }, 0) + ' indicateur(s)</div>';
-  order.forEach(function(thId) {
+  
+  themeOrder.forEach(function(thId) {
     if (!byTheme[thId] || byTheme[thId].length === 0) return;
     var thInfo = THEMES.find(function(t){return t.id===thId;}) || {lbl:thId, cls:'th-social'};
-    var detailed = !!dashThemes[thId], list = rankByImportance(byTheme[thId]);
     html += '<div class="theme-section">';
-    html += '<div class="theme-header clickable ' + (thInfo.cls||'th-social') + '" onclick="toggleDashThemeAndBuild(\'' + thId + '\')">' + thInfo.lbl + ' <span style="opacity:.8;font-weight:400">(' + list.length + ')</span>' +
-      '<span class="hint">' + (detailed ? '▼ détaillé — cliquer pour réduire' : '▶ cliquer pour détailler') + '</span></div>';
-    html += '<div class="cards-grid' + (detailed ? '' : ' mini-grid') + '">';
-    list.forEach(function(m) { html += buildCard(m, detailed ? 'full' : 'mini'); });
-    html += '</div></div>';
+    html += '<div class="theme-header ' + (thInfo.cls||'th-social') + '">' + thInfo.lbl + '</div>';
+    var list = rankByImportance(byTheme[thId]), lim = currentThemeDash === 'all' ? DASH_LIMIT_ALL : DASH_LIMIT_THEME;
+    var open = filtering || !!DASH_EXPANDED[thId] || list.length <= lim + 1;   // en recherche : tous les résultats   // inutile de replier un seul indicateur
+    html += '<div class="cards-grid">';
+    (open ? list : list.slice(0, lim)).forEach(function(m) {
+      html += buildCard(m);
+    });
+    html += '</div>';
+    if (list.length > lim + 1) {
+      html += '<div style="text-align:center;margin:10px 0 4px"><button class="theme-btn" onclick="toggleDashMore(\'' + thId + '\')">' +
+        (open ? '▲ Voir moins' : '▼ Voir plus (' + (list.length - lim) + ' autre' + (list.length - lim > 1 ? 's' : '') + ')') + '</button></div>';
+    }
+    html += '</div>';
   });
+  
   if (!html) {
     if (!ALL_META.length) {
       html = '<div class="msg welcome"><div class="ico">📊</div><strong style="font-size:18px">Bienvenue sur l\'Observatoire social de l\'Aude</strong>' +
         '<p style="margin:10px 0 16px">Pour afficher les indicateurs, chargez les données officielles (INSEE, DREES, CAF, CNSA, Département). Cela prend quelques secondes.</p>' +
         '<button class="gen-pdf-btn" id="welcome-reload" onclick="reloadLive()">⚡ Recharger les données</button></div>';
     } else {
-      html = '<div class="msg"><div class="ico">🔍</div><strong>Aucun indicateur ne correspond à votre recherche</strong><p>Modifiez les mots saisis ou la source.</p></div>';
+      html = '<div class="msg"><div class="ico">📊</div><strong>Aucun indicateur' + (filtering ? ' ne correspond à votre recherche' : ' pour ce thème') + '</strong><p>' + (filtering ? 'Modifiez les mots saisis, la source ou le thème.' : 'Choisissez un autre thème.') + '</p></div>';
     }
   }
   document.getElementById('dash-cards').innerHTML = html;
@@ -985,7 +963,7 @@ function _positionTip(e) {
   tip.style.top  = y + 'px';
 }
 
-function buildCard(m, mode) {
+function buildCard(m) {
   var isNew = m.isNew ? '<div class="card-new">NOUVEAU</div>' : '';
   var srcBadge = '';
   if (m.source && m.source.indexOf('CAF') >= 0) srcBadge = '<span class="badge-caf">CAF</span>';
@@ -1058,44 +1036,17 @@ function buildCard(m, mode) {
 
   var audeValTxt = valFmt + (m.annee ? ' <span style="opacity:.6;font-size:10px">'+m.annee+'</span>' : '');
   
-  var rkMini = m.rank_strate ? '<span class="rank-badge ' + rankClass(m.rank_strate, m.total_strate) + '">' + m.rank_strate + '/' + m.total_strate + '</span>' : (m.rank_fr ? '<span class="rank-badge ' + rankClass(m.rank_fr, m.total_fr) + '">' + m.rank_fr + '/' + m.total_fr + '</span>' : '');
-  var inner;
-  if (mode === 'mini') {
-    inner = '<div class="mini-label" title="' + String(m.label).replace(/"/g, '&quot;') + '">' + m.label + '</div>' +
-      '<div class="mini-row"><span class="mini-val">' + valFmt + '</span>' + rkMini + '</div>';
-  } else {
-    inner = (isNew || '') + '<div class="card-head"><div class="card-label">' + m.label + '</div><div>' + srcBadge + '</div></div>' +
-      '<div class="card-val">' + valFmt + '<span>' + (m.annee || '') + '</span></div>' +
-      (ranksHtml ? '<div class="card-ranks">' + ranksHtml + '</div>' : '') +
-      '<div class="card-def">' + defOf(m) + '</div>' + cardCompare(m) + cardSpark(m);
-  }
-  return '<div class="card ' + (mode === 'mini' ? 'mini' : 'full') + '" data-ind-id="'+m.id+'"' +
+  return '<div class="card" data-ind-id="'+m.id+'"' +
     ' data-tt="'+encodeURIComponent(ttHtml)+'"' +
     ' data-aude-lbl="'+encodeURIComponent(m.label)+'"' +
     ' data-aude-val="'+encodeURIComponent(audeValTxt)+'"' +
     ' onmouseenter="showCardTip(event,this)" onmousemove="moveCardTip(event)" onmouseleave="hideCardTip()"' +
     ' onclick="openModal(this.dataset.indId)">' +
-    (mode === 'mini' ? (isNew ? '' : '') : '') + inner +
+    isNew +
+    '<div class="card-head"><div class="card-label">' + m.label + '</div><div>' + srcBadge + '</div></div>' +
+    '<div class="card-val">' + valFmt + '<span>' + (m.annee || '') + '</span></div>' +
+    (ranksHtml ? '<div class="card-ranks">' + ranksHtml + '</div>' : '') +
     '</div>';
-}
-// Détail des cartes développées : comparatif moyenne / médiane / rang, et mini-courbe d'évolution de l'Aude
-function cardCompare(m) {
-  function row(lbl, st, r, t) {
-    if (!st || st.mean === undefined || st.mean === null) return '';
-    return '<tr><td>' + lbl + '</td><td>' + fmtShort(st.mean, m.fmt) + '</td><td>' + ((st.median !== undefined && st.median !== null) ? fmtShort(st.median, m.fmt) : '—') + '</td><td>' + (r && t ? r + '/' + t : '—') + '</td></tr>';
-  }
-  var rows = row('Strate', m.stats_strate, m.rank_strate, m.total_strate) + row('Occitanie', m.stats_occ, m.rank_occ, m.total_occ) + row('France métro.', m.stats_fr, m.rank_fr, m.total_fr);
-  return rows ? '<table class="card-cmp"><thead><tr><th></th><th>Moyenne</th><th>Médiane</th><th>Rang</th></tr></thead><tbody>' + rows + '</tbody></table>' : '';
-}
-function cardSpark(m) {
-  var ts = DREES_TS[m.id], a = ts && ts['11']; if (!a) return '';
-  var ys = Object.keys(a).sort().filter(function(y) { return typeof a[y] === 'number' && isFinite(a[y]); });
-  if (ys.length < 2) return '';
-  var vs = ys.map(function(y) { return a[y]; }), mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs), sp = (mx - mn) || 1, W = 90, H = 24;
-  var pts = vs.map(function(v, i) { return (2 + i * (W - 4) / (vs.length - 1)).toFixed(1) + ',' + (H - 3 - (v - mn) / sp * (H - 6)).toFixed(1); }).join(' ');
-  var ch = vs[0] ? (vs[vs.length - 1] - vs[0]) / Math.abs(vs[0]) * 100 : null;
-  return '<div class="card-spark"><svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '"><polyline points="' + pts + '" fill="none" stroke="#ED7D31" stroke-width="1.8" stroke-linejoin="round"/></svg>' +
-    '<span>' + ys[0] + ' → ' + ys[ys.length - 1] + (ch !== null && isFinite(ch) ? ' : <b>' + (ch > 0 ? '+' : '') + ch.toFixed(1).replace('.', ',') + ' %</b>' : '') + '</span></div>';
 }
 
 function openModal(indId) {
@@ -2097,12 +2048,10 @@ var exportOpts = { synth: true, rank: true, evo: true, def: true }; // synth = t
 function normTxt(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 // Indicateurs affichés sur la page d'accueil (vue « Tous » : les plus importants de chaque thème)
 function homeIndicators() {
-  var by = dashGroups(true), out = [], anyChecked = dashNbChecked() > 0;
-  Object.keys(by).forEach(function(th) {
-    var l = rankByImportance(by[th]);
-    if (anyChecked) { if (dashThemes[th]) out = out.concat(l); }           // thématiques cochées : tous leurs indicateurs
-    else out = out.concat(l.slice(0, DASH_LIMIT_ALL));                   // aucune cochée : les plus représentatifs de chaque thème
-  });
+  var by = {};
+  ALL_META.forEach(function(m) { var t0 = (m.themes && m.themes[0]) || 'autre'; if (t0 === 'jeunesse') t0 = 'ase'; (by[t0] = by[t0] || []).push(m); });
+  var out = [];
+  Object.keys(by).forEach(function(th) { var l = rankByImportance(by[th]); out = out.concat(l.length <= DASH_LIMIT_ALL + 1 ? l : l.slice(0, DASH_LIMIT_ALL)); });
   return out;
 }
 function exportResetHome() { exportSel = {}; homeIndicators().forEach(function(m) { exportSel[m.id] = true; }); exportTouched = false; buildExport(); }
