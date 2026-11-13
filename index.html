@@ -252,7 +252,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
       <div class="subtitle" id="brand-sub">DREES · INSEE · CAF · CNSA · Open Data Aude</div>
     </div>
   </div>
-  <div class="dom-switch" id="dom-switch"><button id="dom-social" onclick="switchDomain('social')">Social</button><button id="dom-territoire" onclick="switchDomain('territoire')">Territoire</button></div>
+  <div class="dom-switch" id="dom-switch"><button id="dom-social" onclick="switchDomain('social')">Social</button><button id="dom-territoire" onclick="switchDomain('territoire')">Territoire</button><button id="dom-financier" onclick="switchDomain('financier')">Financier</button></div>
   <button class="nav-tab on" onclick="showTab('dash',this)">Tableau de bord</button>
   <button class="nav-tab" onclick="showTab('classement',this)">Classements</button>
   <button class="nav-tab" onclick="showTab('evolution',this)">Évolution</button>
@@ -313,7 +313,7 @@ var evoOverlay = null; // {a, b} : deux indicateurs superposés (base 100) dans 
 var ALL_META = [];
 
 var DOMAIN = 'social';
-try { DOMAIN = (location.hash === '#territoire' || (location.hash !== '#social' && localStorage.getItem('obs_aude_domain') === 'territoire')) ? 'territoire' : 'social'; } catch (eDm) { DOMAIN = location.hash === '#territoire' ? 'territoire' : 'social'; }
+try { var hh = location.hash.replace('#', ''), ls = ''; try { ls = localStorage.getItem('obs_aude_domain') || ''; } catch (e0) {} DOMAIN = /^(social|territoire|financier)$/.test(hh) ? hh : (/^(territoire|financier)$/.test(ls) ? ls : 'social'); } catch (eDm) { DOMAIN = 'social'; }
 var THEMES_SOC = [
   {id:'all', lbl:'Tous'},
   {id:'demographie', lbl:'Démographie', cls:'th-demographie'},
@@ -338,19 +338,63 @@ var THEMES_TERR = [
   {id:'securite', lbl:'Incendie & secours', cls:'th-securite'},
   {id:'finances', lbl:'Budget du Département', cls:'th-finances'}
 ];
-var THEMES = DOMAIN === 'territoire' ? THEMES_TERR : THEMES_SOC;
+var THEMES_FIN = [
+  {id:'all', lbl:'Tous'},
+  {id:'finances', lbl:'Ensemble du budget', cls:'th-finances'},
+  {id:'routes', lbl:'Routes', cls:'th-routes'},
+  {id:'mobilite', lbl:'Transports & mobilité', cls:'th-mobilite'},
+  {id:'education', lbl:'Collèges & éducation', cls:'th-education'},
+  {id:'environnement', lbl:'Environnement', cls:'th-environnement'},
+  {id:'logement', lbl:'Aménagement & habitat', cls:'th-logement'},
+  {id:'securite', lbl:'Incendie & secours', cls:'th-securite'},
+  {id:'ages', lbl:'Personnes âgées', cls:'th-ages'},
+  {id:'handicap', lbl:'Handicap', cls:'th-handicap'},
+  {id:'ase', lbl:'Enfance / ASE / Jeunesse', cls:'th-ase'},
+  {id:'social', lbl:'Social / Insertion', cls:'th-social'}
+];
+var THEMES_BY = { social: THEMES_SOC, territoire: THEMES_TERR, financier: THEMES_FIN };
+var THEMES = THEMES_BY[DOMAIN];
 var DOM_TXT = {
+  financier: {brand:'Observatoire Financier · Aude (11)', sub:'OFGL — Comptes des départements', load:'OFGL', pdf:'Observatoire financier — Département de l\'Aude', welcome:'Observatoire financier de l\'Aude', src:'OFGL — comptes des départements', dur:'Cela prend quelques secondes.'},
   social: {brand:'Observatoire Social · Aude (11)', sub:'DREES · INSEE · CAF · CNSA · Open Data Aude', load:'CAF · DREES · Open Data Aude · INSEE · CNSA · OFGL', pdf:'Observatoire social — Département de l\'Aude', welcome:'Observatoire social de l\'Aude', src:'INSEE, DREES, CAF, CNSA, Département', dur:'Cela prend quelques secondes.'},
   territoire: {brand:'Observatoire du Territoire · Aude (11)', sub:'OFGL · INSEE · Éducation nationale · Sécurité routière', load:'INSEE · OFGL · Éducation nationale · Sécurité routière', pdf:'Observatoire du territoire — Département de l\'Aude', welcome:'Observatoire du territoire de l\'Aude', src:'INSEE, OFGL, Éducation nationale, Sécurité routière', dur:'Cela peut prendre une à deux minutes (fichiers annuels des accidents de la route).'}
 };
-function switchDomain(d) { try { localStorage.setItem('obs_aude_domain', d); } catch (e) {} location.hash = '#' + d; location.reload(); }
+var DOM_CACHE = {};   // données gardées en mémoire par domaine pendant la navigation
+var DOM_STORE = { DREES_META: '[]', DREES_SNAP: '{}', DREES_TS: '{}', INSEE_SNAP: '{}', INSEE_META: '[]', CAF_META: '[]', AUDE_META: '[]', CNSA_META: '[]', OFGL_META: '[]', OFGL_ABS: '{}', OFGL_POP: '{}', ROUTES_RAW: 'null', MAP_CARTEABLE: '{}', OFGL_PREV_IDS: '[]', refreshLog: '[]' };
+function switchDomain(d) {
+  if (d === DOMAIN || !DOM_TXT[d]) return;
+  var btn = document.getElementById('reload-btn'); if (btn && btn.disabled) return;   // chargement en cours
+  var snap = { lastupd: (document.getElementById('lastupd') || {}).textContent };
+  Object.keys(DOM_STORE).forEach(function(k) { snap[k] = window[k]; });
+  DOM_CACHE[DOMAIN] = snap;
+  DOMAIN = d; THEMES = THEMES_BY[d];
+  try { localStorage.setItem('obs_aude_domain', d); } catch (e) {}
+  try { history.replaceState(null, '', '#' + d); } catch (e) { location.hash = '#' + d; }
+  var c = DOM_CACHE[d];
+  Object.keys(DOM_STORE).forEach(function(k) { window[k] = c ? c[k] : JSON.parse(DOM_STORE[k]); });
+  var lu = document.getElementById('lastupd'); if (lu) lu.textContent = (c && c.lastupd) || '—';
+  HIDDEN_LOCAL = [];
+  try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem(d === 'territoire' ? 'obs_aude_terr_hidden' : d === 'financier' ? 'obs_aude_fin_hidden' : 'obs_aude_hidden') || '[]') || []; } catch (e) {}
+  currentThemeDash = 'all'; dashThemes = {}; dashQuery = ''; dashSource = '';
+  exportSel = {}; exportTouched = false; exportTheme = 'all'; exportQuery = ''; exportSource = '';
+  currentThemeRank = currentIndRank = currentIndEvo = currentThemeEvo = currentThemeCarte = currentIndCarte = null; selectedDept = null; evoOverlay = null;
+  applyDomainUI();
+  refreshAllViews();
+  if (typeof renderRankTable === 'function') renderRankTable();
+  if (typeof renderEvoIndBar === 'function') renderEvoIndBar();
+  if (typeof drawEvoChart === 'function') drawEvoChart();
+  if (typeof renderCarteIndBar === 'function') renderCarteIndBar();
+  if (typeof colorMap === 'function') { try { colorMap(); } catch (e) {} }
+  var ex = document.getElementById('export'); if (ex && ex.innerHTML && typeof buildExport === 'function') buildExport();
+  var nv = document.getElementById('nouveautes'); if (nv && nv.classList.contains('on') && typeof buildNouveautes === 'function') buildNouveautes();
+}
 function applyDomainUI() {
   var t = DOM_TXT[DOMAIN];
   document.title = t.brand;
   var b = document.getElementById('brand-title'); if (b) b.textContent = t.brand;
   var s = document.getElementById('brand-sub'); if (s) s.textContent = t.sub;
   var l = document.getElementById('load-sub'); if (l) l.textContent = t.load;
-  ['social','territoire'].forEach(function(k) { var e = document.getElementById('dom-' + k); if (e) e.classList.toggle('on', k === DOMAIN); });
+  ['social','territoire','financier'].forEach(function(k) { var e = document.getElementById('dom-' + k); if (e) e.classList.toggle('on', k === DOMAIN); });
 }
 document.addEventListener('DOMContentLoaded', applyDomainUI);
 
@@ -744,12 +788,12 @@ var HIDDEN_INDICATORS = [
 ];
 // Liste PERSONNELLE : bouton « Masquer » dans la fiche d'un indicateur, mémorisée par le navigateur.
 var HIDDEN_LOCAL = [];
-try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem(DOMAIN === 'territoire' ? 'obs_aude_terr_hidden' : 'obs_aude_hidden') || '[]') || []; } catch (eLs) { HIDDEN_LOCAL = []; }
+try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem(DOMAIN === 'territoire' ? 'obs_aude_terr_hidden' : DOMAIN === 'financier' ? 'obs_aude_fin_hidden' : 'obs_aude_hidden') || '[]') || []; } catch (eLs) { HIDDEN_LOCAL = []; }
 var HIDDEN_METAS = [];
 var ZERO_METAS = []; // indicateurs retirés automatiquement car la valeur de l'Aude est 0
 function isZeroAude(m) { return typeof m.aude === 'number' && Math.abs(m.aude) < 1e-12; }
 function isHiddenInd(id) { return HIDDEN_INDICATORS.indexOf(id) >= 0 || HIDDEN_LOCAL.indexOf(id) >= 0; }
-function saveHidden() { try { localStorage.setItem(DOMAIN === 'territoire' ? 'obs_aude_terr_hidden' : 'obs_aude_hidden', JSON.stringify(HIDDEN_LOCAL)); } catch (eLs) {} }
+function saveHidden() { try { localStorage.setItem(DOMAIN === 'territoire' ? 'obs_aude_terr_hidden' : DOMAIN === 'financier' ? 'obs_aude_fin_hidden' : 'obs_aude_hidden', JSON.stringify(HIDDEN_LOCAL)); } catch (eLs) {} }
 function refreshAllViews() {
   rebuildAllMeta();
   if (typeof buildDash === 'function') buildDash();
@@ -828,7 +872,7 @@ function rebuildAllMeta() {
   if (DOMAIN === 'social' && typeof DREES_META !== 'undefined') DREES_META.forEach(function(m) { ALL_META.push(m); });
   if (typeof OFGL_META !== 'undefined') OFGL_META.forEach(function(m) { ALL_META.push(m); });
   
-  if (typeof INSEE_META !== 'undefined') {
+  if (DOMAIN !== 'financier' && typeof INSEE_META !== 'undefined') {
     INSEE_META.forEach(function(m) {
       if (DOMAIN === 'territoire' && (!m.themes || !(m.themes.indexOf('demographie') >= 0 || m.themes.indexOf('logement') >= 0))) return;   // le territoire ne garde que population et logement
       var full = Object.assign({rank_fr:null,rank_strate:null,rank_occ:null,total_fr:96,total_strate:11,total_occ:13,stats_fr:{},stats_strate:{},stats_occ:{},has_ts:false}, m);
@@ -958,7 +1002,7 @@ function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; rend
 function renderDashCards() {
   var filtering = !!(dashQuery.trim() || dashSource);
   var byTheme = dashGroups(false);
-  var themeOrder = DOMAIN === 'territoire' ? ['routes','mobilite','education','environnement','logement','demographie','securite','finances','autre'] : ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
+  var themeOrder = DOMAIN === 'financier' ? ['finances','routes','mobilite','education','environnement','logement','securite','ages','handicap','ase','social','autre'] : DOMAIN === 'territoire' ? ['routes','mobilite','education','environnement','logement','demographie','securite','finances','autre'] : ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
   // thématiques cochées d'abord (cartes détaillées), les autres ensuite (petites vignettes)
   var order = themeOrder.filter(function(t) { return dashThemes[t]; }).concat(themeOrder.filter(function(t) { return !dashThemes[t]; }));
   var html = '';
@@ -2005,6 +2049,7 @@ function gaugeSet(pct) {
 // Aucune valeur n'est écrite en dur : seuls des libellés, des règles de sélection et des adresses d'API figurent ici.
 // =====================================================================
 var OFGL_POP = {};        // {année: {dép: population}} lue dans l'OFGL (champ ptot) : sert aux taux pour 100 000 habitants
+var ROUTES_EUR = {};      // budget routes du Département en € {equip|fonct|total: {année: {dép: €}}}, pour les ratios au km
 var ROUTES_RAW = null;    // comptages bruts de la sécurité routière {accidents|tues|bh: {année: {dép: n}}}
 var EDU_API = 'https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/';
 var DATAGOUV_API = 'https://www.data.gouv.fr/api/1/datasets/';
@@ -2015,13 +2060,13 @@ var SRC_ONISR = 'Sécurité routière — ONISR (data.gouv.fr)';
 var BAD_FN = /autres?\b|hors |regularis|services? communs|frais communs|non ventil/;
 // Grandes politiques du budget départemental suivies (la fonction exacte est retrouvée dans les libellés de l'OFGL ; « Autres… » est toujours exclu)
 var OFGLT_FN = [
-  { key: 'routes', label: 'Routes et voirie', re: /\broutes?\b|voiries?|reseau routier/, themes: ['routes'] },
+  { key: 'routes', label: 'Routes et voirie', re: /\broutes?\b|voiries?|reseaux? routiers?|infrastructures? (de )?(transport|routier)|reseaux? et infrastructures?/, themes: ['routes'] },
   { key: 'transports', label: 'Transports (hors transports scolaires)', re: /transports?/, not: /scolaire/, themes: ['mobilite'] },
   { key: 'scolaires', label: 'Transports scolaires', re: /transports? scolaires?|scolaires?/, themes: ['mobilite', 'education'] },
   { key: 'colleges', label: 'Collèges', re: /colleges?/, themes: ['education'] },
-  { key: 'environnement', label: 'Environnement', re: /environnement/, themes: ['environnement'] },
-  { key: 'amenagement', label: 'Aménagement du territoire et habitat', re: /amenagement/, themes: ['logement'] },
-  { key: 'incendie', label: 'Incendie et secours', re: /incendie|secours|sdis/, themes: ['securite'] }
+  { key: 'environnement', label: 'Environnement', re: /environnement|ecolog|dechets?|espaces? naturels?|eau et assainissement|energie/, themes: ['environnement'] },
+  { key: 'amenagement', label: 'Aménagement du territoire et habitat', re: /amenagement|habitat|logement|urbanisme|developpement territorial/, themes: ['logement'] },
+  { key: 'incendie', label: 'Incendie et secours', re: /incendie|secours|sdis|securite civile/, themes: ['securite'] }
 ];
 function jsq(v) { return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; }
 function depPickField(rows, cols) {
@@ -2050,6 +2095,7 @@ async function loadOFGLT() {
     if (tbF) { var tbv = await ofglDistinct(idF, tbF, ''), tbp = tbv.find(function(v) { return /principal/.test(normFrCnsa(v)); }); if (tbp) tbWhere = tbF + '=' + jsq(tbp); }
     var labels = await ofglDistinct(idF, f2c, tbWhere);
     var matched = labels.filter(function(l) { var n = normFrCnsa(l); return !BAD_FN.test(n) && OFGLT_FN.some(function(fn) { return fn.re.test(n) && !(fn.not && fn.not.test(n)); }); });
+    addLog('ℹ️', 'OFGL territoire : liste des fonctions disponibles → ' + labels.slice().sort().join(' ; '));
     addLog('ℹ️', 'OFGL territoire : ' + labels.length + ' fonctions au total, ' + matched.length + ' correspondent aux politiques suivies.');
     if (!agEq && !agFo) throw new Error('agrégats « Dépenses d\'équipement » / « Dépenses de fonctionnement » introuvables');
     if (matched.length) {
@@ -2078,9 +2124,11 @@ async function loadOFGLT() {
         var lab = cands[0];
         addLog('ℹ️', 'OFGL territoire : « ' + fn.label + ' » ← fonction « ' + lab + ' »' + (cands.length > 1 ? ' ; écartées : ' + cands.slice(1, 4).join(' ; ') : '') + '.');
         var eq = acc[lab + '|eq'], fo = acc[lab + '|fo'], tot = {}, mapOf = function(o) { var m = {}; if (!o) return m; Object.keys(o.a).forEach(function(y) { Object.keys(o.a[y]).forEach(function(d) { var p = (OFGL_POP[y] || {})[d]; if (p) (m[y] = m[y] || {})[d] = o.a[y][d] / p; }); }); return m; };
+        var mapEur = function(o) { var m = {}; if (!o) return m; Object.keys(o.a).forEach(function(y) { Object.keys(o.a[y]).forEach(function(d) { (m[y] = m[y] || {})[d] = o.a[y][d]; }); }); return m; };
         var hEq = mapOf(eq), hFo = mapOf(fo), hTot = {};
         [eq, fo].forEach(function(o) { if (!o) return; Object.keys(o.a).forEach(function(y) { Object.keys(o.a[y]).forEach(function(d) { (tot[y] = tot[y] || {})[d] = (tot[y][d] || 0) + o.a[y][d]; var p = (OFGL_POP[y] || {})[d]; if (p) (hTot[y] = hTot[y] || {})[d] = (hTot[y][d] || 0) + o.a[y][d] / p; }); }); });
         var base = 'ofgl_t_' + fn.key, what = fn.label.toLowerCase();
+        if (fn.key === 'routes') { ROUTES_EUR = { equip: mapEur(eq), fonct: mapEur(fo), total: mapEur({ a: tot }) }; }
         var mk = function(suffix, lbl, map, unit, fmtc, desc) {
           var e = ofglMakeMeta({ id: base + suffix, label: fn.label + ' — ' + lbl, unit: unit, fmt: fmtc, themes: fn.themes, map: map, techName: lab, source: SRC_OFGLT, desc: desc });
           if (e) nb++;
@@ -2089,6 +2137,8 @@ async function loadOFGLT() {
         if (eq) mk('_equip_hab', 'dépenses d\'équipement (investissement) par habitant', hEq, '€/hab.', 'eur0', common + '. Dépenses d\'équipement : travaux, constructions, acquisitions (investissement), rapportées à la population (euros par habitant).');
         if (fo) mk('_fonct_hab', 'dépenses de fonctionnement par habitant', hFo, '€/hab.', 'eur0', common + '. Dépenses de fonctionnement : entretien courant, contributions, subventions, personnel affecté, rapportées à la population (euros par habitant).');
         if (eq && fo) mk('_total_hab', 'dépenses totales (équipement + fonctionnement) par habitant', hTot, '€/hab.', 'eur0', common + '. Somme des dépenses d\'équipement et de fonctionnement, rapportée à la population (euros par habitant).');
+        if (fn.key === 'routes' && eq) mk('_equip_eur', 'investissement (dépenses d\'équipement) du Département (€)', mapEur(eq), '€', 'eur0', common + '. Dépenses d\'équipement (investissement : travaux de routes, ouvrages d\'art, acquisitions), en euros.');
+        if (fn.key === 'routes' && fo) mk('_fonct_eur', 'dépenses de fonctionnement du Département (€)', mapEur(fo), '€', 'eur0', common + '. Dépenses de fonctionnement (entretien courant, viabilité hivernale, personnel), en euros.');
         if (fn.key === 'routes' && eq && fo) mk('_total_eur', 'dépenses totales du Département (€)', tot, '€', 'eur0', common + '. Somme des dépenses d\'équipement et de fonctionnement, en euros.');
       });
     }
@@ -2291,7 +2341,60 @@ async function loadRoutes() {
 // ---------------------------------------------------------------------
 // Indicateurs dérivés (après chargement de tous les jeux) : sécurité routière, taux pour 100 000 habitants
 // ---------------------------------------------------------------------
+// Réseau routier au 31/12/2023 (INSEE / SDES, tableau TCRD_076, fichier .xlsx sans API) : données saisies ici car aucune API n'existe. À mettre à jour à chaque nouveau millésime.
+var ROAD_NET_YEAR = '2023';
+var ROAD_NET_SRC = 'INSEE — Réseau routier au 31 décembre 2023 (SDES, tableau TCRD_076)';
+var ROAD_NET = "01:232,0,13325;02:147,164,11179;03:203,125,13244;04:66,99,7132;05:26,156,4899;06:75,0,5186;07:0,91,11384;08:82,47,6662;09:16,90,6111;10:152,33,7063;11:155,0,11692;12:74,116,17352;13:329,116,10220;14:132,121,12867;15:50,141,10452;16:0,215,14272;17:136,125,19015;18:124,81,9962;19:179,0,12549;2A:0,0,1538;2B:0,0,1875;21:298,18,12460;22:0,275,21146;23:4,89,11185;24:110,123,19856;25:101,127,9971;26:134,141,12478;27:181,113,13711;28:125,165,13064;29:0,234,18505;30:87,134,14478;31:260,75,15947;32:0,237,11050;33:291,89,20996;34:229,40,11706;35:50,263,15546;36:98,37,11401;37:204,12,12402;38:259,107,16245;39:93,96,8226;40:210,42,12115;41:165,47,10107;42:132,103,12698;43:15,170,11350;44:91,235,18287;45:265,0,10376;46:94,16,13549;47:82,97,10196;48:65,158,7542;49:194,46,17058;50:61,139,16094;51:196,183,10043;52:115,136,6642;53:57,148,8643;54:132,130,8184;55:59,76,6293;56:0,248,18547;57:220,90,10246;58:78,94,9925;59:289,89,15641;60:130,162,12787;61:94,81,12182;62:337,105,15780;63:217,1,20900;64:192,85,16765;65:57,43,6825;66:52,140,6844;67:186,0,4565;68:108,4,10958;69:196,55,9500;70:0,182,8715;71:124,148,16830;72:242,0,13589;73:163,73,8147;74:172,28,9128;75:1,0,3250;76:261,124,14413;77:210,192,12126;78:129,123,5290;79:84,108,14268;80:275,47,11314;81:40,107,12478;82:111,0,8342;83:199,1,10630;84:68,43,8406;85:164,0,17756;86:80,140,13489;87:96,168,12241;88:51,150,10850;89:185,89,13219;90:24,22,1371;91:68,64,6075;92:36,19,1815;93:58,1,2454;94:52,28,2411;95:66,54,4916";   // code département : autoroutes, routes nationales, routes départementales + voies communales (km)
+function roadNetworkInsee() {
+  var cols = { aut: {}, nat: {}, rdvc: {} }, nb = 0;
+  ROAD_NET.split(';').forEach(function(s) {
+    var p = s.split(':'), v = p[1].split(',').map(Number);
+    cols.aut[p[0]] = v[0]; cols.nat[p[0]] = v[1];
+    if (['2A', '2B', '67', '68'].indexOf(p[0]) < 0) cols.rdvc[p[0]] = v[2];   // Corse et Alsace : les routes départementales n'y sont pas comptées dans ce tableau
+  });
+  var one = function(m) { var o = {}; o[ROAD_NET_YEAR] = m; return o; };
+  var defs = [
+    { id: 'insee_reseau_rdvc', lbl: 'Routes départementales et voies communales — longueur', m: cols.rdvc, d: 'Longueur du réseau de routes départementales et de voies communales au 31 décembre 2023, en km (le tableau INSEE ne distingue pas les deux). Corse et Alsace non comparables : exclues du classement.' },
+    { id: 'insee_reseau_autoroutes', lbl: 'Autoroutes — longueur', m: cols.aut, d: 'Longueur des autoroutes (concédées et non concédées) au 31 décembre 2023, en km.' },
+    { id: 'insee_reseau_nationales', lbl: 'Routes nationales — longueur', m: cols.nat, d: 'Longueur des routes nationales (hors autoroutes) au 31 décembre 2023, en km.' }
+  ];
+  defs.forEach(function(x) { var e = ofglMakeMeta({ id: x.id, label: x.lbl, unit: 'km', fmt: 'int', themes: ['routes'], map: one(x.m), techName: 'TCRD_076', source: ROAD_NET_SRC, desc: x.d }); if (e) nb++; });
+  var ys = Object.keys(OFGL_POP).sort(), dens = {};
+  Object.keys(cols.rdvc).forEach(function(c) {
+    var pop = null; for (var i = ys.length - 1; i >= 0 && !pop; i--) pop = (OFGL_POP[ys[i]] || {})[c];
+    if (pop) dens[c] = cols.rdvc[c] / pop * 1000;
+  });
+  if (Object.keys(dens).length > 20) { var e2 = ofglMakeMeta({ id: 'insee_reseau_rdvc_1000hab', label: 'Routes départementales et voies communales — km pour 1 000 habitants', unit: 'km/1 000 hab.', fmt: 'dec1', themes: ['routes'], map: one(dens), techName: 'TCRD_076', source: ROAD_NET_SRC, desc: 'Longueur de routes départementales et de voies communales rapportée à la population (population de l\'OFGL, dernière année disponible).' }); if (e2) nb++; }
+  addLog(nb ? '✅' : '⚠️', 'INSEE réseau routier ' + ROAD_NET_YEAR + ' : ' + nb + ' indicateur(s) créé(s) (données intégrées au fichier).');
+}
+// Ratios croisés : budget routes ÷ longueur du réseau, et personnes tuées ÷ longueur du réseau (dernière année disponible, longueur INSEE au 31/12/2023)
+function roadRatios() {
+  var km = {}, kmAll = {}, nb = 0;
+  ROAD_NET.split(';').forEach(function(s) {
+    var p = s.split(':'), v = p[1].split(',').map(Number), c = deptCodeOf(p[0]);
+    if (['2A', '2B', '67', '68'].indexOf(p[0]) < 0) { km[c] = v[2]; kmAll[c] = v[0] + v[1] + v[2]; }
+  });
+  var lastOf = function(m) { var ys = Object.keys(m || {}).sort(); return ys.length ? ys[ys.length - 1] : null; };
+  var one = function(y, o) { var r = {}; r[y] = o; return r; };
+  [['equip', 'investissement (dépenses d\'équipement) par km de routes', 'Dépenses d\'équipement (investissement) du Département pour les routes, rapportées à la longueur du réseau de routes départementales et voies communales de l\'INSEE (km).'],
+   ['fonct', 'dépenses de fonctionnement par km de routes', 'Dépenses de fonctionnement (entretien courant, viabilité…) du Département pour les routes, rapportées à la longueur du réseau de routes départementales et voies communales de l\'INSEE (km).'],
+   ['total', 'dépenses totales par km de routes', 'Dépenses totales (équipement + fonctionnement) du Département pour les routes, rapportées à la longueur du réseau de routes départementales et voies communales de l\'INSEE (km).']].forEach(function(x) {
+    var m = ROUTES_EUR[x[0]], y = lastOf(m); if (!y) return;
+    var o = {}; Object.keys(m[y]).forEach(function(d) { if (km[d]) o[d] = m[y][d] / km[d]; });
+    var e = ofglMakeMeta({ id: 'ofgl_t_routes_' + x[0] + '_km', label: 'Routes — ' + x[1], unit: '€/km', fmt: 'eur0', themes: ['routes'], map: one(y, o), techName: 'OFGL ÷ TCRD_076', source: SRC_OFGLT + ' ; ' + ROAD_NET_SRC, desc: x[2] + ' Le tableau INSEE regroupe départementales et voies communales : le ratio est à lire en comparaison entre départements. Corse et Alsace exclues (réseau non comparable). Année du budget : ' + y + '.' });
+    if (e) nb++;
+  });
+  if (ROUTES_RAW && ROUTES_RAW.tues) {
+    var yt = lastOf(ROUTES_RAW.tues), t = {};
+    if (yt) { Object.keys(ROUTES_RAW.tues[yt]).forEach(function(d) { if (kmAll[d]) t[d] = ROUTES_RAW.tues[yt][d] / kmAll[d] * 1000; });
+      var e2 = ofglMakeMeta({ id: 'onisr_tues_1000km', label: 'Personnes tuées pour 1 000 km de réseau routier', unit: 'tués/1 000 km', fmt: 'dec1', themes: ['routes'], map: one(yt, t), techName: 'ONISR ÷ TCRD_076', source: SRC_ONISR + ' ; ' + ROAD_NET_SRC, desc: 'Personnes tuées dans l\'année ' + yt + ' sur les routes du département, rapportées à la longueur totale du réseau (autoroutes + nationales + départementales et voies communales, INSEE 2023). Corse et Alsace exclues.' });
+      if (e2) nb++; }
+  }
+  addLog(nb ? '✅' : 'ℹ️', 'Ratios au km de réseau routier : ' + nb + ' indicateur(s) créé(s).');
+}
 function finalizeTerritoire() {
+  try { roadNetworkInsee(); } catch (eRn) { addLog('⚠️', 'Réseau routier INSEE : ' + eRn.message + '.'); }
+  try { roadRatios(); } catch (eRr) { addLog('⚠️', 'Ratios au km : ' + eRr.message + '.'); }
   if (!ROUTES_RAW) return;
   var nb = 0, popOf = function(y, d) { var p = (OFGL_POP[y] || {})[d]; if (p) return p; var ys = Object.keys(OFGL_POP).sort(); for (var i = ys.length - 1; i >= 0; i--) { if (ys[i] <= y && OFGL_POP[ys[i]][d]) return OFGL_POP[ys[i]][d]; } return null; };
   var def = [
@@ -2331,12 +2434,18 @@ async function reloadLive() {
 
     if (typeof addLog === 'function') addLog('⏳', 'Rechargement des données démarré...', false);
 
-    var totalSources = DOMAIN === 'territoire' ? 4 : 6, doneSources = 0;
+    var totalSources = DOMAIN === 'territoire' ? 4 : DOMAIN === 'financier' ? 2 : 6, doneSources = 0;
     function gaugeTick() { doneSources++; gaugeSet(6 + (doneSources / totalSources) * 90); }
     function withGauge(p) { return p.then(gaugeTick, gaugeTick); }
 
     var resultats;
-    if (DOMAIN === 'territoire') {
+    if (DOMAIN === 'financier') {
+      OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
+      OFGL_META = []; OFGL_ABS = {}; OFGL_KEEP = true;
+      try {
+        resultats = await Promise.allSettled([withGauge(loadOFGL()), withGauge(loadOFGLT())]);
+      } finally { OFGL_KEEP = false; }
+    } else if (DOMAIN === 'territoire') {
       OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
       OFGL_META = [];
       resultats = await Promise.allSettled([
@@ -2982,6 +3091,7 @@ function ofglMakeMeta(spec) {
   return e;
 }
 var OFGL_PREV_IDS = [];
+var OFGL_KEEP = false;   // vrai quand loadOFGL et loadOFGLT tournent ensemble (domaine Financier) : ne pas vider OFGL_META
 // Foyers RSA (ou autre champ CAF) pour TOUS les départements, au dernier mois publié de chaque année
 async function cafDeptByYear(fieldKey, nbYears) {
   var out = {};
@@ -3014,8 +3124,7 @@ async function cafDeptByYear(fieldKey, nbYears) {
 
 async function loadOFGL() {
   addLog('⏳', 'Chargement OFGL (finances des départements)...');
-  OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
-  OFGL_META = []; OFGL_ABS = {};
+  if (!OFGL_KEEP) { OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; }); OFGL_META = []; OFGL_ABS = {}; }
   var fromYear = new Date().getFullYear() - 9, nbAg = 0, nbFn = 0;
   var fnAbs = {};   // fonctions : label → {année: {dép: €}} (pour les ratios croisés)
   try {
