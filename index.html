@@ -39,6 +39,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#edf2f7;color:#1a284
 .mini-row{display:flex;justify-content:space-between;align-items:center;gap:4px;margin-top:3px}
 .mini-val{font-size:15px;font-weight:700;color:#1a2845;white-space:nowrap}
 .card.full{padding:14px}
+.card-src{font-size:10px;color:#7a8aa0;margin:0 0 6px;line-height:1.3;font-style:italic}
+.th-recettes{background:#2e7d52}.th-depenses{background:#b5541a}.th-fiscalite{background:#7a3a8a}.th-dotations{background:#1a6b8a}.th-dette{background:#a02030}.th-fonctions{background:#4a5a7a}
 .card-def{font-size:11px;color:#5a6a7a;line-height:1.4;margin:6px 0 8px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .card-cmp{width:100%;border-collapse:collapse;font-size:10.5px;margin-top:6px}
 .card-cmp th{font-weight:600;color:#8aaabb;font-size:9px;text-align:right;padding:1px 3px}
@@ -340,7 +342,12 @@ var THEMES_TERR = [
 ];
 var THEMES_FIN = [
   {id:'all', lbl:'Tous'},
-  {id:'finances', lbl:'Ensemble du budget', cls:'th-finances'},
+  {id:'depenses', lbl:'Dépenses & charges', cls:'th-depenses'},
+  {id:'recettes', lbl:'Recettes', cls:'th-recettes'},
+  {id:'fiscalite', lbl:'Fiscalité & DMTO', cls:'th-fiscalite'},
+  {id:'dotations', lbl:'Dotations & concours de l\'État', cls:'th-dotations'},
+  {id:'dette', lbl:'Dette & épargne', cls:'th-dette'},
+  {id:'fonctions', lbl:'Dépenses par fonction', cls:'th-fonctions'},
   {id:'routes', lbl:'Routes', cls:'th-routes'},
   {id:'mobilite', lbl:'Transports & mobilité', cls:'th-mobilite'},
   {id:'education', lbl:'Collèges & éducation', cls:'th-education'},
@@ -350,7 +357,8 @@ var THEMES_FIN = [
   {id:'ages', lbl:'Personnes âgées', cls:'th-ages'},
   {id:'handicap', lbl:'Handicap', cls:'th-handicap'},
   {id:'ase', lbl:'Enfance / ASE / Jeunesse', cls:'th-ase'},
-  {id:'social', lbl:'Social / Insertion', cls:'th-social'}
+  {id:'social', lbl:'Social / Insertion', cls:'th-social'},
+  {id:'finances', lbl:'Tous les postes budgétaires', cls:'th-finances'}
 ];
 var THEMES_BY = { social: THEMES_SOC, territoire: THEMES_TERR, financier: THEMES_FIN };
 var THEMES = THEMES_BY[DOMAIN];
@@ -1002,7 +1010,7 @@ function toggleDashMore(thId) { DASH_EXPANDED[thId] = !DASH_EXPANDED[thId]; rend
 function renderDashCards() {
   var filtering = !!(dashQuery.trim() || dashSource);
   var byTheme = dashGroups(false);
-  var themeOrder = DOMAIN === 'financier' ? ['finances','routes','mobilite','education','environnement','logement','securite','ages','handicap','ase','social','autre'] : DOMAIN === 'territoire' ? ['routes','mobilite','education','environnement','logement','demographie','securite','finances','autre'] : ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
+  var themeOrder = DOMAIN === 'financier' ? ['depenses','recettes','fiscalite','dotations','dette','fonctions','routes','mobilite','education','environnement','logement','securite','ages','handicap','ase','social','finances','autre'] : DOMAIN === 'territoire' ? ['routes','mobilite','education','environnement','logement','demographie','securite','finances','autre'] : ['demographie','revenus','emploi','logement','ages','handicap','ase','jeunesse','pmi','financier','finances','social','aude','autre'];
   // thématiques cochées d'abord (cartes détaillées), les autres ensuite (petites vignettes)
   var order = themeOrder.filter(function(t) { return dashThemes[t]; }).concat(themeOrder.filter(function(t) { return !dashThemes[t]; }));
   var html = '';
@@ -1137,7 +1145,8 @@ function buildCard(m, mode) {
     ttStatsRow('Occitanie ('+(m.total_occ||'?')+' dép.)', m.aude, m.stats_occ) +
     ttStatsRow('France métro. ('+(m.total_fr||'?')+' dép.)', m.aude, m.stats_fr) +
     '</tbody></table>' +
-    '<div style="color:#7ab;font-size:8.5px;margin-top:4px;font-style:italic">Unité : '+(m.unit||'—')+'</div>';
+    '<div style="color:#7ab;font-size:8.5px;margin-top:4px;font-style:italic">Unité : '+(m.unit||'—')+'</div>' +
+    '<div style="color:#8ab;font-size:9.5px;margin-top:3px"><b>Source :</b> '+String(m.source||'non renseignée').replace(/</g,'&lt;')+'</div>';
 
   var audeValTxt = valFmt + (m.annee ? ' <span style="opacity:.6;font-size:10px">'+m.annee+'</span>' : '');
   
@@ -1150,7 +1159,7 @@ function buildCard(m, mode) {
     inner = (isNew || '') + '<div class="card-head"><div class="card-label">' + m.label + '</div><div>' + srcBadge + '</div></div>' +
       '<div class="card-val">' + valFmt + '<span>' + (m.annee || '') + '</span></div>' +
       (ranksHtml ? '<div class="card-ranks">' + ranksHtml + '</div>' : '') +
-      '<div class="card-def">' + defOf(m) + '</div>' + cardCompare(m) + cardSpark(m);
+      '<div class="card-def">' + defOf(m) + '</div>' + '<div class="card-src">Source : ' + String(m.source || 'non renseignée').replace(/</g, '&lt;') + '</div>' + cardCompare(m) + cardSpark(m);
   }
   return '<div class="card ' + (mode === 'mini' ? 'mini' : 'full') + '" data-ind-id="'+m.id+'"' +
     ' data-tt="'+encodeURIComponent(ttHtml)+'"' +
@@ -2178,6 +2187,101 @@ async function loadOFGLT() {
   } catch (e2) { addLog('⚠️', 'OFGL territoire (ensemble du budget) : ' + e2.message + '.'); }
   addLog(nb ? '✅' : '⚠️', 'OFGL territoire : ' + nb + ' indicateur(s) chargé(s).');
 }
+
+// ---------------------------------------------------------------------
+// OFGL — base complète des départements : tous les agrégats (dépenses, recettes, DMTO, fiscalité, dotations, dette, épargne…) et toutes les fonctions
+// ---------------------------------------------------------------------
+var SRC_OFGLF = 'OFGL — Comptes individuels des départements, budget principal (data.ofgl.fr, DGFiP)';
+function ofglSlug(t) { return normFrCnsa(t).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60); }
+function ofglFinThemes(label) {
+  var t = normFrCnsa(label), th = [];
+  if (/depense|charge|equipement|investissement|remboursement|subvention|personnel|allocation|contribution|interet|frais/.test(t)) th.push('depenses');
+  if (/recette|produit|dotation|impot|taxe|fiscal|dmto|mutation|emprunt|subvention|concours|fctva|cvae|tscc|ticpe|tfpb|redevance|vente|participation/.test(t) && !/^depenses?|charges?/.test(t)) th.push('recettes');
+  if (/impot|taxe|fiscal|dmto|mutation|cvae|tscc|ticpe|tfpb|contributions? directes|droits/.test(t)) th.push('fiscalite');
+  if (/dotation|dgf|fctva|compensation|concours|fonds|peréquation|perequation|attribution/.test(t)) th.push('dotations');
+  if (/dette|encours|epargne|capacite|desendettement|emprunt|annuite|remboursement de la dette|autofinancement|fonds de roulement|tresorerie/.test(t)) th.push('dette');
+  return th;
+}
+async function loadOFGLFull() {
+  addLog('⏳', 'Chargement OFGL (base complète des finances des départements)...');
+  var nb = 0, nbF = 0, nowY = new Date().getFullYear(), fromYear = nowY - 9;
+  var popAll = {};
+  // ---------- 1) tous les agrégats ----------
+  try {
+    var idA = 'ofgl-base-departements', fA = await ofglSchema(idA);
+    var yA = ofglPick(fA, ['exer', 'exercice', 'annee']), aA = ofglPick(fA, ['agregat']), mA = ofglPick(fA, ['montant']), pA = ofglPick(fA, ['ptot', 'population']), tbA = ofglPick(fA, ['type_de_budget']);
+    var depA = fA.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
+    if (!yA || !aA || !mA || !depA.length) throw new Error('champs attendus introuvables (exercice=' + yA + ', agrégat=' + aA + ', montant=' + mA + ')');
+    var tbW = '';
+    if (tbA) { var tbv = await ofglDistinct(idA, tbA, ''), tbp = tbv.find(function(v) { return /principal/.test(normFrCnsa(v)); }); if (tbp) tbW = tbA + '=' + jsq(tbp); }
+    var selA = [yA].concat(depA, [aA, mA]); if (pA) selA.push(pA);
+    var got = await ofglRows(idA, selA, yA, fromYear, tbW), depF = depPickField(got.rows, depA);
+    addLog('ℹ️', 'OFGL complet : ' + got.rows.length + ' lignes d\'agrégats lues (champ département : ' + depF + ').');
+    var byAg = {};
+    got.rows.forEach(function(rr) {
+      var y = ofglYear(rr[yA]), d = deptCodeOf(rr[depF]), ag = rr[aA], mo = ofglNum(rr[mA]);
+      if (!y || !d || !ag || mo === null) return;
+      var p = pA ? ofglNum(rr[pA]) : null; if (p) (popAll[y] = popAll[y] || {})[d] = p;
+      var o = byAg[ag] = byAg[ag] || { eur: {}, hab: {} };
+      (o.eur[y] = o.eur[y] || {})[d] = (o.eur[y][d] || 0) + mo;
+    });
+    Object.keys(byAg).forEach(function(ag) {
+      var o = byAg[ag];
+      Object.keys(o.eur).forEach(function(y) { Object.keys(o.eur[y]).forEach(function(d) { var p = (popAll[y] || {})[d]; if (p) (o.hab[y] = o.hab[y] || {})[d] = o.eur[y][d] / p; }); });
+      var th = ofglFinThemes(ag), slug = ofglSlug(ag);
+      var common = 'Poste « ' + ag + ' » des comptes des départements (budget principal), source OFGL / DGFiP.';
+      var e1 = ofglMakeMeta({ id: 'ofgl_f_' + slug + '_hab', label: ag + ' — par habitant', unit: '€/hab.', fmt: 'eur0', themes: th, map: o.hab, techName: ag, source: SRC_OFGLF, desc: common + ' Montant rapporté à la population du département (euros par habitant).' });
+      if (e1) nb++;
+      var e2 = ofglMakeMeta({ id: 'ofgl_f_' + slug + '_eur', label: ag + ' — montant', unit: '€', fmt: 'eur0', themes: th, map: o.eur, techName: ag, source: SRC_OFGLF, desc: common + ' Montant total en euros.' });
+      if (e2) nb++;
+    });
+  } catch (e1) { addLog('⚠️', 'OFGL complet (agrégats) : ' + e1.message + '.'); }
+  // ---------- 2) toutes les fonctions (dépenses d'équipement + de fonctionnement, 4 dernières années) ----------
+  try {
+    var idF = 'ofgl-base-departements-fonctionnelle', fF = await ofglSchema(idF);
+    var yF = ofglPick(fF, ['exer', 'exercice', 'annee']), aF = ofglPick(fF, ['agregat']), mF = ofglPick(fF, ['montant']), pF = ofglPick(fF, ['ptot', 'population']), tbF = ofglPick(fF, ['type_de_budget']);
+    var f2c = ofglPick(fF, ['classement_fonctionnel_2']) || ofglPick(fF, ['nom_fonction']) || ofglPick(fF, ['fonctionnelle_1']);
+    var depC = fF.filter(function(f) { return /dep/.test(normFrCnsa(f.name)) && !/tranche|pop/.test(normFrCnsa(f.name)); }).map(function(f) { return f.name; });
+    if (!yF || !aF || !mF || !f2c || !depC.length) throw new Error('champs attendus introuvables');
+    var agVals = await ofglDistinct(idF, aF, '');
+    var agEq = agVals.find(function(v) { return /^depenses d.equipement/.test(normFrCnsa(v)); }), agFo = agVals.find(function(v) { return /^depenses de fonctionnement/.test(normFrCnsa(v)); });
+    if (!agEq && !agFo) throw new Error('agrégats équipement / fonctionnement introuvables');
+    var tbW2 = '';
+    if (tbF) { var tbv2 = await ofglDistinct(idF, tbF, ''), tbp2 = tbv2.find(function(v) { return /principal/.test(normFrCnsa(v)); }); if (tbp2) tbW2 = tbF + '=' + jsq(tbp2); }
+    var wh = aF + ' IN (' + [agEq, agFo].filter(Boolean).map(jsq).join(',') + ')' + (tbW2 ? ' AND ' + tbW2 : '');
+    var sel = [yF].concat(depC, [aF, mF, f2c]); if (pF) sel.push(pF);
+    var gotF = await ofglRows(idF, sel, yF, nowY - 4, wh), depFF = depPickField(gotF.rows, depC);
+    addLog('ℹ️', 'OFGL complet : ' + gotF.rows.length + ' lignes de dépenses par fonction lues.');
+    var byFn = {};
+    gotF.rows.forEach(function(rr) {
+      var y = ofglYear(rr[yF]), d = deptCodeOf(rr[depFF]), lab = rr[f2c], mo = ofglNum(rr[mF]);
+      if (!y || !d || !lab || mo === null) return;
+      var p = pF ? ofglNum(rr[pF]) : null; if (p) (popAll[y] = popAll[y] || {})[d] = p;
+      var kind = rr[aF] === agEq ? 'eq' : 'fo', o = byFn[lab] = byFn[lab] || { eq: {}, fo: {}, tot: {} };
+      (o[kind][y] = o[kind][y] || {})[d] = (o[kind][y][d] || 0) + mo;
+      (o.tot[y] = o.tot[y] || {})[d] = (o.tot[y][d] || 0) + mo;
+    });
+    var perHab = function(m) { var h = {}; Object.keys(m).forEach(function(y) { Object.keys(m[y]).forEach(function(d) { var p = (popAll[y] || {})[d]; if (p) (h[y] = h[y] || {})[d] = m[y][d] / p; }); }); return h; };
+    var fnTh = function(lab) {
+      var t = normFrCnsa(lab), th = ['fonctions'];
+      OFGLT_FN.forEach(function(fn) { if (fn.re.test(t) && !(fn.not && fn.not.test(t))) fn.themes.forEach(function(x) { if (th.indexOf(x) < 0) th.push(x); }); });
+      if (/personnes agees|autonomie/.test(t)) th.push('ages');
+      if (/handicap/.test(t)) th.push('handicap');
+      if (/enfance|famille|jeunesse|aide sociale a l.enfance|protection maternelle/.test(t)) th.push('ase');
+      if (/insertion|rsa|revenu de solidarite|action sociale|social/.test(t)) th.push('social');
+      return th;
+    };
+    Object.keys(byFn).forEach(function(lab) {
+      var o = byFn[lab], ly = Object.keys(o.tot).sort().pop();
+      if (!ly || !(((o.tot[ly] || {})['11']) > 0)) return;
+      var slug = ofglSlug(lab), th = fnTh(lab), common = 'Fonction « ' + lab + ' » de la nomenclature comptable des départements (budget principal), dépenses d\'équipement + de fonctionnement, source OFGL / DGFiP.';
+      var e1 = ofglMakeMeta({ id: 'ofgl_ff_' + slug + '_hab', label: lab + ' — dépenses par habitant', unit: '€/hab.', fmt: 'eur0', themes: th, map: perHab(o.tot), techName: lab, source: SRC_OFGLF, desc: common + ' Rapportées à la population (euros par habitant).' });
+      var e2 = ofglMakeMeta({ id: 'ofgl_ff_' + slug + '_eur', label: lab + ' — dépenses (€)', unit: '€', fmt: 'eur0', themes: th, map: o.tot, techName: lab, source: SRC_OFGLF, desc: common + ' Montant total en euros.' });
+      if (e1) nbF++; if (e2) nbF++;
+    });
+  } catch (e2) { addLog('⚠️', 'OFGL complet (fonctions) : ' + e2.message + '.'); }
+  addLog((nb + nbF) ? '✅' : '⚠️', 'OFGL complet : ' + nb + ' indicateur(s) d\'agrégats et ' + nbF + ' indicateur(s) par fonction chargés.');
+}
 // ---------------------------------------------------------------------
 // 2) Éducation nationale : collèges (Opendatasoft, data.education.gouv.fr)
 // ---------------------------------------------------------------------
@@ -2416,6 +2520,43 @@ function finalizeTerritoire() {
 }
 
 
+
+// ---- Chargement de plusieurs domaines à la suite (un seul bouton « Recharger » pour Social, Territoire et Financier) ----
+function domStash() {
+  var snap = { lastupd: (document.getElementById('lastupd') || {}).textContent };
+  Object.keys(DOM_STORE).forEach(function(k) { snap[k] = window[k]; });
+  DOM_CACHE[DOMAIN] = snap;
+}
+function domEnter(d) {
+  DOMAIN = d; THEMES = THEMES_BY[d];
+  var c = DOM_CACHE[d];
+  Object.keys(DOM_STORE).forEach(function(k) { window[k] = c ? c[k] : JSON.parse(DOM_STORE[k]); });
+  HIDDEN_LOCAL = [];
+  try { HIDDEN_LOCAL = JSON.parse(localStorage.getItem(d === 'territoire' ? 'obs_aude_terr_hidden' : d === 'financier' ? 'obs_aude_fin_hidden' : 'obs_aude_hidden') || '[]') || []; } catch (e) {}
+}
+async function runDomainLoaders(d, withGauge) {
+  if (d === 'financier') {
+    OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
+    OFGL_META = []; OFGL_ABS = {}; OFGL_POP = {};
+    return await Promise.allSettled([withGauge(loadOFGLFull())]);
+  }
+  if (d === 'territoire') {
+    OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
+    OFGL_META = [];
+    var rt = await Promise.allSettled([withGauge(loadINSEE()), withGauge(loadOFGLT()), withGauge(loadEduc()), withGauge(loadRoutes())]);
+    try { finalizeTerritoire(); } catch (eFin) { addLog('⚠️', 'Indicateurs dérivés : ' + eFin.message + '.'); }
+    return rt;
+  }
+  return await Promise.allSettled([
+    withGauge(typeof loadCAF === 'function' ? loadCAF() : Promise.reject(new Error('loadCAF introuvable'))),
+    withGauge(typeof loadDREES === 'function' ? loadDREES() : Promise.reject(new Error('loadDREES introuvable'))),
+    withGauge(typeof loadAude === 'function' ? loadAude() : Promise.reject(new Error('loadAude introuvable'))),
+    withGauge(typeof loadINSEE === 'function' ? loadINSEE() : Promise.reject(new Error('loadINSEE introuvable'))),
+    withGauge(typeof loadCNSA === 'function' ? loadCNSA() : Promise.reject(new Error('loadCNSA introuvable'))),
+    withGauge(typeof loadOFGL === 'function' ? loadOFGL() : Promise.reject(new Error('loadOFGL introuvable')))
+  ]);
+}
+
 async function reloadLive() {
   const btn = document.getElementById('reload-btn');
   const lastUpdEl = document.getElementById('lastupd');
@@ -2434,37 +2575,19 @@ async function reloadLive() {
 
     if (typeof addLog === 'function') addLog('⏳', 'Rechargement des données démarré...', false);
 
-    var totalSources = DOMAIN === 'territoire' ? 4 : DOMAIN === 'financier' ? 2 : 6, doneSources = 0;
+    var userDomain = DOMAIN, order = [DOMAIN].concat(['social', 'territoire', 'financier'].filter(function(x) { return x !== userDomain; }));
+    var totalSources = 11, doneSources = 0;
     function gaugeTick() { doneSources++; gaugeSet(6 + (doneSources / totalSources) * 90); }
     function withGauge(p) { return p.then(gaugeTick, gaugeTick); }
 
-    var resultats;
-    if (DOMAIN === 'financier') {
-      OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
-      OFGL_META = []; OFGL_ABS = {}; OFGL_KEEP = true;
-      try {
-        resultats = await Promise.allSettled([withGauge(loadOFGL()), withGauge(loadOFGLT())]);
-      } finally { OFGL_KEEP = false; }
-    } else if (DOMAIN === 'territoire') {
-      OFGL_PREV_IDS = OFGL_META.map(function(m) { return m.id; });
-      OFGL_META = [];
-      resultats = await Promise.allSettled([
-        withGauge(loadINSEE()),
-        withGauge(loadOFGLT()),
-        withGauge(loadEduc()),
-        withGauge(loadRoutes())
-      ]);
-      try { finalizeTerritoire(); } catch (eFin) { addLog('⚠️', 'Indicateurs dérivés : ' + eFin.message + '.'); }
-    } else {
-      resultats = await Promise.allSettled([
-        withGauge(typeof loadCAF === 'function' ? loadCAF() : Promise.reject(new Error('loadCAF introuvable'))),
-        withGauge(typeof loadDREES === 'function' ? loadDREES() : Promise.reject(new Error('loadDREES introuvable'))),
-        withGauge(typeof loadAude === 'function' ? loadAude() : Promise.reject(new Error('loadAude introuvable'))),
-        withGauge(typeof loadINSEE === 'function' ? loadINSEE() : Promise.reject(new Error('loadINSEE introuvable'))),
-        withGauge(typeof loadCNSA === 'function' ? loadCNSA() : Promise.reject(new Error('loadCNSA introuvable'))),
-        withGauge(typeof loadOFGL === 'function' ? loadOFGL() : Promise.reject(new Error('loadOFGL introuvable')))
-      ]);
+    var resultats = [];
+    for (var oi = 0; oi < order.length; oi++) {
+      var dm = order[oi];
+      if (DOMAIN !== dm) { domStash(); domEnter(dm); refreshLog.length = 0; addLog('⏳', 'Rechargement du domaine « ' + dm + ' »...', false); }
+      try { resultats = resultats.concat(await runDomainLoaders(dm, withGauge)); }
+      catch (eDm) { addLog('⚠️', 'Domaine ' + dm + ' : ' + eDm.message + '.', false); }
     }
+    if (DOMAIN !== userDomain) { domStash(); domEnter(userDomain); }
     gaugeSet(100);
 
     if (typeof rebuildAllMeta === 'function') rebuildAllMeta();
@@ -2484,7 +2607,7 @@ async function reloadLive() {
 
     if (typeof addLog === 'function') {
       if (erreurs.length === 0) {
-        addLog('✅', 'Rechargement terminé : les ' + nbOk + ' sources ont été interrogées.', false);
+        addLog('✅', 'Rechargement terminé (Social, Territoire, Financier) : les ' + nbOk + ' sources ont été interrogées.', false);
       } else {
         addLog('⚠️', 'Rechargement terminé avec ' + nbOk + ' source(s) OK et ' + erreurs.length + ' erreur(s).', false);
       }
